@@ -57,6 +57,7 @@ async function runRegressionSuite() {
   const mockTPMat: TPData = {
     id: 'tp-data-mat',
     academicSettingId: 'setting-sd-4',
+    workflowStatus: 'SIAP',
     items: [
       {
         id: 'tp-mat-1',
@@ -108,6 +109,7 @@ async function runRegressionSuite() {
       approach: 'deskripsi',
       indicators: ['Menyebutkan contoh pecahan senilai'],
       levels: [],
+      workflowStatus: 'SIAP',
       updatedAt: new Date().toISOString(),
     },
   ];
@@ -302,6 +304,7 @@ async function runRegressionSuite() {
       approach: 'rubrik',
       indicators: [],
       levels: [],
+      workflowStatus: 'SIAP',
       updatedAt: new Date().toISOString(),
     },
   ];
@@ -369,6 +372,7 @@ async function runRegressionSuite() {
   const tpPjokMotorik: TPData = {
     id: 'tp-pjok',
     academicSettingId: settingPJOK.id,
+    workflowStatus: 'SIAP',
     items: [
       {
         id: 'tp-p-1',
@@ -564,6 +568,7 @@ async function runRegressionSuite() {
   const tpSeniMusik: TPData = {
     id: 'tp-seni',
     academicSettingId: settingSeniMusik.id,
+    workflowStatus: 'SIAP',
     items: [
       {
         id: 'tp-s-1',
@@ -931,6 +936,7 @@ async function runRegressionSuite() {
   const tpEmptyText: TPData = {
     id: 'tp-empty',
     academicSettingId: 'setting-sd-4',
+    workflowStatus: 'SIAP',
     items: [
       {
         id: 'tp-empty-1',
@@ -1006,6 +1012,7 @@ async function runRegressionSuite() {
   const tpForBJ: TPData = {
     id: 'tp-bj',
     academicSettingId: 'setting-sd-4',
+    workflowStatus: 'SIAP',
     items: [
       {
         id: 'tp-mat-unmatch',
