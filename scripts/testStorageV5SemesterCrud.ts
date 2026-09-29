@@ -917,6 +917,134 @@ runTest('13. Persistence roundtrip: Semester state save -> load matches with exa
   assert.deepStrictEqual(state2, state1);
 });
 
+// =========================================================================
+// TEST 14: KKTP + AssessmentPlan + AssessmentPackage chain persistence & getRuntimeContextV5
+// =========================================================================
+runTest('14. KKTP + AssessmentPlan + AssessmentPackage chain persistence & getRuntimeContextV5 integration', () => {
+  mockStorage.clear();
+  const { profile, school } = seedProfileAndSchool();
+
+  const h = createYearHierarchyV5({
+    profileId: profile.id,
+    schoolId: school.id,
+    academicYear: '2026/2027',
+    curriculumType: 'KURIKULUM_MERDEKA',
+    level: 'SMA',
+    grade: 'Kelas 10',
+    subject: 'Biologi',
+  });
+
+  const sem1Id = h.semesterPlans[0].id;
+
+  // 1. Save KKTP criteria
+  const sampleCriteria: AssessmentCriterion[] = [
+    {
+      id: 'crit-bio-1',
+      academicSettingId: sem1Id,
+      tpId: 'tp-bio-101',
+      description: 'KKTP Biologi Sel',
+      approach: 'rubrik',
+      indicators: ['Indikator 1', 'Indikator 2'],
+      levels: [
+        { level: 'Cukup', label: 'Cukup', description: 'Memahami dasar' },
+        { level: 'Baik', label: 'Baik', description: 'Memahami penuh' },
+      ],
+      workflowStatus: 'SIAP',
+      needsReview: false,
+      updatedAt: '2026-07-01T00:00:00Z',
+    },
+  ];
+  saveAssessmentCriteriaV5(sem1Id, sampleCriteria);
+
+  // 2. Save AssessmentPlan referencing KKTP criteria & TP
+  const samplePlan: AssessmentPlan[] = [
+    {
+      id: 'plan-bio-1',
+      academicSettingId: sem1Id,
+      title: 'Asesmen Formatif Biologi Sel',
+      purpose: 'FORMATIVE',
+      timing: 'POST',
+      scopeType: 'TP',
+      tpIds: ['tp-bio-101'],
+      criterionIds: ['crit-bio-1'],
+      instruments: [{ type: 'WRITTEN_TEST', title: 'Tes Tertulis Sel' }],
+      workflowStatus: 'SIAP',
+      needsReview: false,
+      updatedAt: '2026-07-01T00:00:00Z',
+    },
+  ];
+  saveAssessmentPlansV5(sem1Id, samplePlan);
+
+  // 3. Save AssessmentPackage referencing AssessmentPlan
+  const samplePackage: AssessmentPackage[] = [
+    {
+      id: 'pkg-bio-1',
+      academicSettingId: sem1Id,
+      assessmentPlanId: 'plan-bio-1',
+      title: 'Perangkat Asesmen Formatif Biologi Sel',
+      instruments: [],
+      workflowStatus: 'SIAP',
+      needsReview: false,
+      updatedAt: '2026-07-01T00:00:00Z',
+    },
+  ];
+  saveAssessmentPackagesV5(sem1Id, samplePackage);
+
+  // Verify getSemesterDataV5
+  const semData = getSemesterDataV5(sem1Id);
+  assert.deepStrictEqual(semData.assessmentCriteria, sampleCriteria);
+  assert.deepStrictEqual(semData.assessmentPlan, samplePlan);
+  assert.deepStrictEqual(semData.assessmentPackage, samplePackage);
+});
+
+// =========================================================================
+// TEST 15: Semester 1 vs Semester 2 KKTP & Assessment Isolation
+// =========================================================================
+runTest('15. Semester 1 vs Semester 2 KKTP & Assessment Isolation: S1 data does not bleed into S2', () => {
+  mockStorage.clear();
+  const { profile, school } = seedProfileAndSchool();
+
+  const h = createYearHierarchyV5({
+    profileId: profile.id,
+    schoolId: school.id,
+    academicYear: '2026/2027',
+    curriculumType: 'KURIKULUM_MERDEKA',
+    level: 'SMA',
+    grade: 'Kelas 10',
+    subject: 'Biologi',
+  });
+
+  const sem1Id = h.semesterPlans[0].id;
+  const sem2Id = h.semesterPlans[1].id;
+
+  // Save S1 KKTP & AssessmentPlan
+  const s1Criteria: AssessmentCriterion[] = [
+    {
+      id: 'crit-s1-1',
+      academicSettingId: sem1Id,
+      tpId: 'tp-s1-1',
+      description: 'KKTP Semester 1',
+      approach: 'deskripsi',
+      indicators: ['Indikator S1'],
+      levels: [],
+      workflowStatus: 'SIAP',
+      needsReview: false,
+      updatedAt: '2026-07-01T00:00:00Z',
+    },
+  ];
+  saveAssessmentCriteriaV5(sem1Id, s1Criteria);
+
+  // Read S2
+  const s2Data = getSemesterDataV5(sem2Id);
+  assert.strictEqual(s2Data.assessmentCriteria, undefined, 'S2 assessmentCriteria must be undefined');
+  assert.strictEqual(s2Data.assessmentPlan, undefined, 'S2 assessmentPlan must be undefined');
+  assert.strictEqual(s2Data.assessmentPackage, undefined, 'S2 assessmentPackage must be undefined');
+
+  // Read S1
+  const s1Data = getSemesterDataV5(sem1Id);
+  assert.deepStrictEqual(s1Data.assessmentCriteria, s1Criteria, 'S1 assessmentCriteria must match saved S1 criteria');
+});
+
 console.log(`\n========================================`);
 console.log(`ALL STORAGE V5 SEMESTER CRUD TESTS PASSED (${passedTests}/${totalTests})`);
 console.log(`========================================\n`);

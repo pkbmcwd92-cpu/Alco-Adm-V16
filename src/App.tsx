@@ -13,8 +13,13 @@ import {
   AdministrationWorkspace,
   AppDocumentRecord,
   LearningPlan,
+  AssessmentCriterion,
   AssessmentPlan,
   AssessmentPackage,
+  Assessment,
+  AssessmentResult,
+  AttendanceSession,
+  AttendanceRecord,
   Student,
   RemedialRecord,
   EnrichmentRecord,
@@ -52,6 +57,14 @@ import {
   saveSemesterJPSettingV5,
   saveTimeAllocationV5,
   saveLearningPlansV5,
+  saveAssessmentCriteriaV5,
+  saveAssessmentPlansV5,
+  saveAssessmentPackagesV5,
+  saveGradeV5,
+  saveRosterV5,
+  saveAttendanceV5,
+  saveRemedialV5,
+  saveEnrichmentV5,
 } from './services/storageV5';
 import { getRuntimeContextV5 } from './services/runtimeV5';
 import {
@@ -806,13 +819,174 @@ export function App() {
       });
     }
   };
-  const handleSaveStudents = (stdList: any[]) => {};
-  const handleSaveAttendance = (session: any, records: any[]) => {};
-  const handleSaveCriteria = (criteria: any[]) => {};
-  const handleSaveAssessment = (assessment: any, results: any[]) => {};
-  const handleDeleteAssessment = (assessmentId: string) => {};
-  const handleSaveRemedials = (records: any[]) => {};
-  const handleSaveEnrichments = (records: any[]) => {};
+  const handleSaveStudents = (stdList: Student[]) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan data siswa.',
+      });
+      return;
+    }
+    try {
+      saveRosterV5(activeSemesterPlan.id, stdList);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan data siswa.',
+      });
+    }
+  };
+
+  const handleSaveAttendance = (session: AttendanceSession, records: AttendanceRecord[]) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan presensi.',
+      });
+      return;
+    }
+    try {
+      const currentEntry = runtimeContext.semesterData?.attendance || { sessions: [], records: [] };
+      const existingSessions = currentEntry.sessions || [];
+      const existingRecords = currentEntry.records || [];
+
+      const nextSessions = existingSessions.some((s) => s.id === session.id)
+        ? existingSessions.map((s) => (s.id === session.id ? session : s))
+        : [...existingSessions, session];
+
+      const otherRecords = existingRecords.filter((r) => r.sessionId !== session.id);
+      const nextRecords = [...otherRecords, ...records];
+
+      saveAttendanceV5(activeSemesterPlan.id, {
+        sessions: nextSessions,
+        records: nextRecords,
+      });
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan presensi.',
+      });
+    }
+  };
+
+  const handleSaveCriteria = (criteria: AssessmentCriterion[]) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan kriteria (KKTP).',
+      });
+      return;
+    }
+    try {
+      saveAssessmentCriteriaV5(activeSemesterPlan.id, criteria);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan kriteria (KKTP).',
+      });
+    }
+  };
+
+  const handleSaveAssessment = (assessment: Assessment, results: AssessmentResult[]) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan nilai asesmen.',
+      });
+      return;
+    }
+    try {
+      const currentGrade = runtimeContext.semesterData?.grade || { assessments: [], results: [] };
+      const existingAsms = currentGrade.assessments || [];
+      const existingResults = currentGrade.results || [];
+
+      const nextAsms = existingAsms.some((a) => a.id === assessment.id)
+        ? existingAsms.map((a) => (a.id === assessment.id ? assessment : a))
+        : [...existingAsms, assessment];
+
+      const otherResults = existingResults.filter((r) => r.assessmentId !== assessment.id);
+      const nextResults = [...otherResults, ...results];
+
+      saveGradeV5(activeSemesterPlan.id, {
+        assessments: nextAsms,
+        results: nextResults,
+      });
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan nilai asesmen.',
+      });
+    }
+  };
+
+  const handleDeleteAssessment = (assessmentId: string) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menghapus nilai asesmen.',
+      });
+      return;
+    }
+    try {
+      const currentGrade = runtimeContext.semesterData?.grade || { assessments: [], results: [] };
+      const nextAsms = (currentGrade.assessments || []).filter((a) => a.id !== assessmentId);
+      const nextResults = (currentGrade.results || []).filter((r) => r.assessmentId !== assessmentId);
+
+      saveGradeV5(activeSemesterPlan.id, {
+        assessments: nextAsms,
+        results: nextResults,
+      });
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menghapus nilai asesmen.',
+      });
+    }
+  };
+
+  const handleSaveRemedials = (records: RemedialRecord[]) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan data remedial.',
+      });
+      return;
+    }
+    try {
+      saveRemedialV5(activeSemesterPlan.id, records);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan data remedial.',
+      });
+    }
+  };
+
+  const handleSaveEnrichments = (records: EnrichmentRecord[]) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan data pengayaan.',
+      });
+      return;
+    }
+    try {
+      saveEnrichmentV5(activeSemesterPlan.id, records);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan data pengayaan.',
+      });
+    }
+  };
+
   const handleSaveK13Analysis = (analysis: any) => {};
   const handleSaveK13KKM = (kkm: any) => {};
   const handleSaveLearningPlan = (plan: LearningPlan) => {
@@ -866,10 +1040,103 @@ export function App() {
       });
     }
   };
-  const handleSaveAssessmentPlan = (plan: any) => {};
-  const handleDeleteAssessmentPlan = (planId: string) => {};
-  const handleSaveAssessmentPackage = (pkg: any) => {};
-  const handleDeleteAssessmentPackage = (pkgId: string) => {};
+  const handleSaveAssessmentPlan = (plan: AssessmentPlan) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan rencana asesmen.',
+      });
+      return;
+    }
+    try {
+      const existing = runtimeContext.semesterData?.assessmentPlan || [];
+      const planWithTimestamp = {
+        ...plan,
+        updatedAt: new Date().toISOString(),
+      };
+      const nextPlans = existing.some((p) => p.id === plan.id)
+        ? existing.map((p) => (p.id === plan.id ? planWithTimestamp : p))
+        : [...existing, planWithTimestamp];
+
+      saveAssessmentPlansV5(activeSemesterPlan.id, nextPlans);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan rencana asesmen.',
+      });
+    }
+  };
+
+  const handleDeleteAssessmentPlan = (planId: string) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menghapus rencana asesmen.',
+      });
+      return;
+    }
+    try {
+      const existing = runtimeContext.semesterData?.assessmentPlan || [];
+      const nextPlans = existing.filter((p) => p.id !== planId);
+      saveAssessmentPlansV5(activeSemesterPlan.id, nextPlans);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menghapus rencana asesmen.',
+      });
+    }
+  };
+
+  const handleSaveAssessmentPackage = (pkg: AssessmentPackage) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan perangkat asesmen.',
+      });
+      return;
+    }
+    try {
+      const existing = runtimeContext.semesterData?.assessmentPackage || [];
+      const pkgWithTimestamp = {
+        ...pkg,
+        updatedAt: new Date().toISOString(),
+      };
+      const nextPackages = existing.some((p) => p.id === pkg.id || (p.assessmentPlanId && p.assessmentPlanId === pkg.assessmentPlanId))
+        ? existing.map((p) => (p.id === pkg.id || (p.assessmentPlanId && p.assessmentPlanId === pkg.assessmentPlanId) ? pkgWithTimestamp : p))
+        : [...existing, pkgWithTimestamp];
+
+      saveAssessmentPackagesV5(activeSemesterPlan.id, nextPackages);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan perangkat asesmen.',
+      });
+    }
+  };
+
+  const handleDeleteAssessmentPackage = (pkgId: string) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menghapus perangkat asesmen.',
+      });
+      return;
+    }
+    try {
+      const existing = runtimeContext.semesterData?.assessmentPackage || [];
+      const nextPackages = existing.filter((p) => p.id !== pkgId);
+      saveAssessmentPackagesV5(activeSemesterPlan.id, nextPackages);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menghapus perangkat asesmen.',
+      });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-800 flex flex-col font-sans selection:bg-blue-100 selection:text-blue-900">
@@ -1117,23 +1384,23 @@ export function App() {
               tp={activeTP}
               atp={activeATP}
               documents={v5State.documents || []}
-              students={[]}
+              students={runtimeContext.semesterData?.roster || []}
               calendar={runtimeContext.semesterData?.academicCalendar?.calendar}
               calendarDays={runtimeContext.semesterData?.academicCalendar?.days || []}
               timeAllocations={runtimeContext.semesterData?.timeAllocation || []}
               semesterJPSetting={runtimeContext.semesterJPSetting}
               annualJPReference={runtimeContext.annualData?.annualJPReference}
               protaSemesterAllocations={protaSemesterAllocations}
-              attendanceSessions={[]}
-              attendanceRecords={[]}
-              assessmentCriteria={[]}
-              assessments={[]}
-              assessmentResults={[]}
-              remedials={[]}
-              enrichments={[]}
+              attendanceSessions={runtimeContext.semesterData?.attendance?.sessions || []}
+              attendanceRecords={runtimeContext.semesterData?.attendance?.records || []}
+              assessmentCriteria={runtimeContext.semesterData?.assessmentCriteria || []}
+              assessments={runtimeContext.semesterData?.grade?.assessments || []}
+              assessmentResults={runtimeContext.semesterData?.grade?.results || []}
+              remedials={runtimeContext.semesterData?.remedial || []}
+              enrichments={runtimeContext.semesterData?.enrichment || []}
               learningPlans={runtimeContext.semesterData?.learningPlan || []}
-              assessmentPlans={[]}
-              assessmentPackages={[]}
+              assessmentPlans={runtimeContext.semesterData?.assessmentPlan || []}
+              assessmentPackages={runtimeContext.semesterData?.assessmentPackage || []}
               onSaveCalendar={handleSaveCalendar}
               onSaveSemesterJPSetting={handleSaveSemesterJPSetting}
               onSaveTimeAllocations={handleSaveTimeAllocations}

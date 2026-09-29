@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Award,
   Sparkles,
@@ -122,6 +122,36 @@ export const KKTPManager: React.FC<KKTPManagerProps> = ({
       setIntake(typeof kkmMatch?.intake === 'number' ? kkmMatch.intake : null);
     }
   };
+
+  useEffect(() => {
+    const nextList = assessmentCriteria || [];
+    setCriteriaList(nextList);
+    const targetId = selectedItemId || targetItems[0]?.id;
+    if (targetId) {
+      const found = nextList.find((c) => c.tpId === targetId);
+      const kkmMatch = k13KKM?.items?.find((k) => k.id === targetId);
+      if (found) {
+        setApproach(found.approach);
+        setIndicators(found.indicators || []);
+        setLevels(found.levels || []);
+        if (found.kompleksitas !== undefined || found.dayaDukung !== undefined || found.intake !== undefined) {
+          setKompleksitas(found.kompleksitas ?? null);
+          setDayaDukung(found.dayaDukung ?? null);
+          setIntake(found.intake ?? null);
+        } else {
+          setKompleksitas(typeof kkmMatch?.kompleksitas === 'number' ? kkmMatch.kompleksitas : null);
+          setDayaDukung(typeof kkmMatch?.dayaDukung === 'number' ? kkmMatch.dayaDukung : null);
+          setIntake(typeof kkmMatch?.intake === 'number' ? kkmMatch.intake : null);
+        }
+      } else {
+        setIndicators([]);
+        setLevels([]);
+        setKompleksitas(typeof kkmMatch?.kompleksitas === 'number' ? kkmMatch.kompleksitas : null);
+        setDayaDukung(typeof kkmMatch?.dayaDukung === 'number' ? kkmMatch.dayaDukung : null);
+        setIntake(typeof kkmMatch?.intake === 'number' ? kkmMatch.intake : null);
+      }
+    }
+  }, [assessmentCriteria, academicSetting.id]);
 
   // KKM computation strictly adheres to: NO DATA > FAKE DATA
   const hasCompleteKkmInputs =
