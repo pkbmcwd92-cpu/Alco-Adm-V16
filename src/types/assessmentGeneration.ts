@@ -410,6 +410,7 @@ export interface GeneratedItemUnit extends GeneratedAssessmentUnitBase {
   matchingResponses?: { id: string; text: string }[];
   categoryStatements?: { id: string; text: string }[];
   categoryCategories?: { id: string; label: string }[];
+  responseScheme?: string;
   proposedAnswer?: {
     answerType:
       | 'EXACT'

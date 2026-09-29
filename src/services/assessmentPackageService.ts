@@ -814,6 +814,17 @@ export function validateAssessmentPackage(
             if (!item.prompt || item.prompt.trim() === '') {
               errors.push(`Pertanyaan tes lisan #${itemIdx + 1} belum memiliki teks pertanyaan.`);
             }
+
+            // Oral test must have expectedResponse and scoring mechanism
+            if (!item.expectedResponse || item.expectedResponse.trim() === '') {
+              errors.push(`Pertanyaan tes lisan #${itemIdx + 1} wajib memiliki jawaban yang diharapkan (expected response).`);
+            }
+            const hasScoringGuideForItem = (pkg.scoringGuides || []).some(
+              (sg) => sg.instrumentId === oral.id && sg.instrumentItemId === item.id
+            );
+            if (!hasScoringGuideForItem) {
+              errors.push(`Pertanyaan tes lisan #${itemIdx + 1} wajib memiliki pedoman penskoran (scoring guide).`);
+            }
           });
         }
         break;
@@ -823,11 +834,19 @@ export function validateAssessmentPackage(
         if (!perf.task || perf.task.trim() === '') {
           errors.push('Asesmen Performa/Praktik wajib memiliki instruksi/tugas yang jelas.');
         }
+        if (!perf.aspects || perf.aspects.length === 0) {
+          errors.push('Asesmen Performa/Praktik wajib memiliki minimal 1 aspek penilaian.');
+        } else {
+          perf.aspects.forEach((asp, idx) => {
+            if (!asp.label || asp.label.trim() === '') {
+              errors.push(`Aspek penilaian #${idx + 1} pada Asesmen Performa/Praktik belum memiliki label.`);
+            }
+          });
+        }
         const hasRubric = perf.rubricId && pkg.rubrics.some((r) => r.id === perf.rubricId);
         const hasScoringGuide = perf.scoringGuideId && pkg.scoringGuides.some((sg) => sg.id === perf.scoringGuideId);
-        const hasAspects = perf.aspects && perf.aspects.length > 0;
-        if (!hasRubric && !hasScoringGuide && !hasAspects) {
-          errors.push('Asesmen Performa/Praktik wajib dilengkapi rubrik, pedoman penskoran, atau aspek penilaian.');
+        if (!hasRubric && !hasScoringGuide) {
+          errors.push('Asesmen Performa/Praktik wajib dilengkapi rubrik atau pedoman penskoran yang valid.');
         }
         break;
       }
@@ -842,12 +861,25 @@ export function validateAssessmentPackage(
             }
           });
         }
+        // If scored observation (it has recordingScheme)
+        if (obs.recordingScheme && obs.recordingScheme.trim() !== '') {
+          obs.aspects.forEach((asp, aspIdx) => {
+            if (!asp.indicator || asp.indicator.trim() === '') {
+              errors.push(`Aspek observasi #${aspIdx + 1} ("${asp.label}") wajib memiliki indikator pengamatan pada scored observation.`);
+            }
+          });
+        }
         break;
       }
       case 'ASSIGNMENT': {
         const assign = inst as AssignmentAssessmentInstrument;
         if (!assign.instructions || assign.instructions.trim() === '') {
           errors.push('Penugasan wajib memiliki instruksi tugas.');
+        }
+        const hasRubric = assign.rubricId && pkg.rubrics.some((r) => r.id === assign.rubricId);
+        const hasScoringGuide = assign.scoringGuideId && pkg.scoringGuides.some((sg) => sg.id === assign.scoringGuideId);
+        if (!hasRubric && !hasScoringGuide) {
+          errors.push('Penugasan wajib dilengkapi rubrik atau pedoman penskoran.');
         }
         break;
       }
@@ -856,6 +888,11 @@ export function validateAssessmentPackage(
         if (!proj.projectBrief || proj.projectBrief.trim() === '') {
           errors.push('Asesmen Proyek wajib memiliki brief/deskripsi proyek.');
         }
+        const hasRubric = proj.rubricId && pkg.rubrics.some((r) => r.id === proj.rubricId);
+        const hasScoringGuide = proj.scoringGuideId && pkg.scoringGuides.some((sg) => sg.id === proj.scoringGuideId);
+        if (!hasRubric && !hasScoringGuide) {
+          errors.push('Asesmen Proyek wajib dilengkapi rubrik atau pedoman penskoran.');
+        }
         break;
       }
       case 'PRODUCT': {
@@ -863,12 +900,22 @@ export function validateAssessmentPackage(
         if (!prod.productBrief || prod.productBrief.trim() === '') {
           errors.push('Asesmen Produk wajib memiliki brief/deskripsi produk.');
         }
+        const hasRubric = prod.rubricId && pkg.rubrics.some((r) => r.id === prod.rubricId);
+        const hasScoringGuide = prod.scoringGuideId && pkg.scoringGuides.some((sg) => sg.id === prod.scoringGuideId);
+        if (!hasRubric && !hasScoringGuide) {
+          errors.push('Asesmen Produk wajib dilengkapi rubrik atau pedoman penskoran.');
+        }
         break;
       }
       case 'PORTFOLIO': {
         const port = inst as PortfolioAssessmentInstrument;
         if (!port.evidenceRequirements || port.evidenceRequirements.length === 0) {
           errors.push('Asesmen Portofolio wajib mencantumkan persyaratan bukti (evidence requirements).');
+        }
+        const hasRubric = port.rubricId && pkg.rubrics.some((r) => r.id === port.rubricId);
+        const hasScoringGuide = port.scoringGuideId && pkg.scoringGuides.some((sg) => sg.id === port.scoringGuideId);
+        if (!hasRubric && !hasScoringGuide) {
+          errors.push('Asesmen Portofolio wajib dilengkapi rubrik atau pedoman penskoran.');
         }
         break;
       }
@@ -883,6 +930,14 @@ export function validateAssessmentPackage(
               errors.push(`Pernyataan asesmen #${itemIdx + 1} belum diisi.`);
             }
           });
+        }
+        if (!selfPeer.responseScheme || selfPeer.responseScheme.trim() === '') {
+          errors.push(`Asesmen Diri/Sebaya (${inst.type}) wajib memiliki skema respon (responseScheme).`);
+        }
+        // Must NOT have any answer keys
+        const selfPeerKeys = (pkg.answerKeys || []).filter((ak) => ak.instrumentId === inst.id);
+        if (selfPeerKeys.length > 0) {
+          errors.push(`Asesmen Diri/Sebaya (${inst.type}) tidak boleh memiliki kunci jawaban (AssessmentAnswerKey).`);
         }
         break;
       }

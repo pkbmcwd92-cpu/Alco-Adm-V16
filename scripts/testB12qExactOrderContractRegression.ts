@@ -180,6 +180,26 @@ function createValidBasePackage(): AssessmentPackage {
     instrumentItemId: essayItemId,
   };
 
+  const sgOral1: AssessmentScoringGuide = {
+    id: 'sg-oral-1',
+    title: 'Pedoman Penskoran Lisan 1',
+    guideType: 'MANUAL',
+    instructions: 'Jawaban tepat skor 5',
+    maxScore: 5,
+    instrumentId: 'inst-oral-1',
+    instrumentItemId: 'item-oral-1',
+  };
+
+  const sgOral2: AssessmentScoringGuide = {
+    id: 'sg-oral-2',
+    title: 'Pedoman Penskoran Lisan 2',
+    guideType: 'MANUAL',
+    instructions: 'Jawaban tepat skor 5',
+    maxScore: 5,
+    instrumentId: 'inst-oral-1',
+    instrumentItemId: 'item-oral-2',
+  };
+
   return {
     id: 'pkg-plan-1',
     assessmentPlanId: 'plan-1',
@@ -206,7 +226,7 @@ function createValidBasePackage(): AssessmentPackage {
     ],
     instruments: [writtenInst, oralInst],
     answerKeys: [akMc, akEssay],
-    scoringGuides: [sg],
+    scoringGuides: [sg, sgOral1, sgOral2],
     rubrics: [rub],
     workflowStatus: 'SIAP',
     needsReview: false,

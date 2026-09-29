@@ -1029,7 +1029,10 @@ export function parseAndValidateRawAIResponse(
               return;
             }
           } else if (itemType === 'SHORT_ANSWER') {
-            if (!hasProposedAns) {
+            const hasProposedSA = candidate.proposedAnswer && (
+              candidate.proposedAnswer.value || candidate.proposedAnswer.explanation
+            );
+            if (!hasProposedSA) {
               issues.push({
                 code: 'MISSING_ITEM_PROPOSED_ANSWER',
                 severity: 'REVIEW',
@@ -1115,6 +1118,7 @@ export function parseAndValidateRawAIResponse(
           matchingResponses: Array.isArray(candidate.matchingResponses) ? candidate.matchingResponses : undefined,
           categoryStatements: Array.isArray(candidate.categoryStatements) ? candidate.categoryStatements : undefined,
           categoryCategories: Array.isArray(candidate.categoryCategories) ? candidate.categoryCategories : undefined,
+          responseScheme: typeof candidate.responseScheme === 'string' && candidate.responseScheme.trim() ? candidate.responseScheme.trim() : undefined,
           proposedAnswer: candidate.proposedAnswer
             ? {
                 answerType: candidate.proposedAnswer.answerType || 'OPTION',
@@ -1705,10 +1709,7 @@ export function mapGeneratedUnitsToAssessmentPackage(
               });
             }
           } else if (itemUnit.itemType === 'ESSAY') {
-            const val =
-              itemUnit.proposedAnswer?.value ||
-              itemUnit.proposedAnswer?.explanation ||
-              itemUnit.scoringGuideDraft?.instructions;
+            const val = itemUnit.proposedAnswer?.value;
 
             if (val && String(val).trim()) {
               answerKeys.push({
@@ -1721,24 +1722,22 @@ export function mapGeneratedUnitsToAssessmentPackage(
               });
             }
 
-            // Always create Essay ScoringGuide
-            const sgId = createDeterministicScoringGuideId(instId, itemId);
-            const guideInstructions =
-              itemUnit.scoringGuideDraft?.instructions ||
-              (itemUnit.proposedAnswer?.value
-                ? `Pedoman Penskoran Uraian: Berikan skor berdasarkan kelengkapan jawaban siswa terhadap pokok jawaban: ${itemUnit.proposedAnswer.value}`
-                : 'Pedoman Penskoran Uraian: Berikan skor berdasarkan kebenaran konsep, kelengkapan uraian, dan keruntutan penjelasan.');
-            const maxScore = itemUnit.scoringGuideDraft?.maxScore || 10;
+            // Create Essay ScoringGuide ONLY if provided in scoringGuideDraft (no fake fallbacks!)
+            const guideInstructions = itemUnit.scoringGuideDraft?.instructions;
+            const maxScore = itemUnit.scoringGuideDraft?.maxScore;
 
-            scoringGuides.push({
-              id: sgId,
-              title: `Pedoman Penskoran Uraian Butir #${uIdx + 1}`,
-              instrumentId: instId,
-              instrumentItemId: itemId,
-              guideType: 'ESSAY',
-              instructions: guideInstructions,
-              maxScore: maxScore,
-            });
+            if (guideInstructions && maxScore) {
+              const sgId = createDeterministicScoringGuideId(instId, itemId);
+              scoringGuides.push({
+                id: sgId,
+                title: `Pedoman Penskoran Uraian Butir #${uIdx + 1}`,
+                instrumentId: instId,
+                instrumentItemId: itemId,
+                guideType: 'ESSAY',
+                instructions: guideInstructions,
+                maxScore: maxScore,
+              });
+            }
           } else if (itemUnit.itemType === 'MATCHING') {
             const pairs = itemUnit.proposedAnswer?.matchingPairs || (itemUnit as any).matchingPairs || [];
             if (pairs.length > 0) {
@@ -1850,6 +1849,19 @@ export function mapGeneratedUnitsToAssessmentPackage(
             expectedResponse: itemUnit.proposedAnswer?.value || itemUnit.proposedAnswer?.explanation,
             order: uIdx + 1,
           });
+
+          if (itemUnit.scoringGuideDraft && itemUnit.scoringGuideDraft.instructions) {
+            const sgId = createDeterministicScoringGuideId(instId, itemId);
+            scoringGuides.push({
+              id: sgId,
+              title: `Pedoman Penskoran Tes Lisan Butir #${uIdx + 1}`,
+              instrumentId: instId,
+              instrumentItemId: itemId,
+              guideType: 'MANUAL',
+              instructions: itemUnit.scoringGuideDraft.instructions,
+              maxScore: itemUnit.scoringGuideDraft.maxScore || 5,
+            });
+          }
         });
 
         instruments.push({
@@ -1865,10 +1877,16 @@ export function mapGeneratedUnitsToAssessmentPackage(
       case 'SELF_ASSESSMENT':
       case 'PEER_ASSESSMENT': {
         const selfPeerItems: SelfPeerAssessmentItem[] = [];
+        let responseScheme: string | undefined;
+
         units.forEach((u, uIdx) => {
           if (u.allocationUnit !== 'ITEM') return;
           const itemUnit = u as GeneratedItemUnit;
           const itemId = createDeterministicItemId(instId, uIdx);
+
+          if (!responseScheme && itemUnit.responseScheme) {
+            responseScheme = itemUnit.responseScheme;
+          }
 
           const covItems = coverageToItemIds.get(u.coverageUnitId) || [];
           covItems.push(itemId);
@@ -1890,6 +1908,7 @@ export function mapGeneratedUnitsToAssessmentPackage(
             : 'Instrumen Penilaian Antar-Teman',
           instructions: undefined,
           items: selfPeerItems,
+          responseScheme: responseScheme || undefined,
         } as SelfPeerAssessmentInstrument);
         break;
       }

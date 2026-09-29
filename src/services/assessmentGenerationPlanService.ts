@@ -630,9 +630,7 @@ export function resolveAssessmentGenerationPlan(
         }
       });
       for (let i = plannedDifficulties.length; i < N_total; i++) {
-        const uId = plannedCoverageUnitIds[i];
-        const u = itemUnits.find((unit) => unit.id === uId);
-        plannedDifficulties.push(u?.difficultyTarget || 'MODERATE');
+        plannedDifficulties.push(undefined);
       }
     } else {
       // If no explicit difficulty distribution requested, use whatever is on the coverage unit (no defaults!)
@@ -657,9 +655,7 @@ export function resolveAssessmentGenerationPlan(
         }
       });
       for (let i = plannedCognitives.length; i < N_total; i++) {
-        const uId = plannedCoverageUnitIds[i];
-        const u = itemUnits.find((unit) => unit.id === uId);
-        plannedCognitives.push(u?.cognitiveDemand || 'APPLY');
+        plannedCognitives.push(undefined);
       }
     } else {
       // If no explicit cognitive distribution requested, use whatever is on the coverage unit (no defaults!)

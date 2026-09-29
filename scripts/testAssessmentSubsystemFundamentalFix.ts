@@ -43,6 +43,7 @@ import {
 } from '../src/services/assessmentPackageGeneratorService';
 import { validateAssessmentCoverage } from '../src/services/assessmentCoverageValidationService';
 import { verifyAssessmentPackageAnswers } from '../src/services/assessmentAnswerVerificationService';
+import { validateAssessmentPackage, confirmAssessmentPackage } from '../src/services/assessmentPackageService';
 import {
   AcademicSetting,
   AssessmentAIGenerationProvider,
@@ -184,9 +185,70 @@ async function runSubsystemRegressionTests() {
   });
 
   assert.strictEqual(genPlanDist.constraints.requestedTotalItems, 10, 'Constraints preserve requestedTotalItems');
-  assert.ok(genPlanDist.coverageUnits.every((u) => u.difficultyTarget !== undefined), 'Difficulty targets allocated to coverage units');
-  assert.ok(genPlanDist.coverageUnits.every((u) => u.cognitiveDemand !== undefined), 'Cognitive demand targets allocated to coverage units');
-  console.log('  [PASS] Difficulty and cognitive demand distributions resolved and assigned deterministically');
+  assert.strictEqual(genPlanDist.plannedItems.length, 10, 'plannedItems.length is exactly 10');
+
+  // Exact difficulty distribution assert
+  const basicCount = genPlanDist.plannedItems.filter((it) => it.difficultyTarget === 'BASIC').length;
+  const modCount = genPlanDist.plannedItems.filter((it) => it.difficultyTarget === 'MODERATE').length;
+  const chalCount = genPlanDist.plannedItems.filter((it) => it.difficultyTarget === 'CHALLENGING').length;
+  assert.strictEqual(basicCount, 3, 'BASIC count is exactly 3');
+  assert.strictEqual(modCount, 5, 'MODERATE count is exactly 5');
+  assert.strictEqual(chalCount, 2, 'CHALLENGING count is exactly 2');
+  console.log('  [PASS] Exact difficulty distribution: BASIC=3, MODERATE=5, CHALLENGING=2');
+
+  // Exact cognitive distribution assert
+  const recallCount = genPlanDist.plannedItems.filter((it) => it.cognitiveDemand === 'RECALL_UNDERSTAND').length;
+  const applyCount = genPlanDist.plannedItems.filter((it) => it.cognitiveDemand === 'APPLY').length;
+  const analyzeCount = genPlanDist.plannedItems.filter((it) => it.cognitiveDemand === 'ANALYZE_REASON').length;
+  const evalCount = genPlanDist.plannedItems.filter((it) => it.cognitiveDemand === 'EVALUATE_CREATE').length;
+  assert.strictEqual(recallCount, 2, 'RECALL_UNDERSTAND count is exactly 2');
+  assert.strictEqual(applyCount, 4, 'APPLY count is exactly 4');
+  assert.strictEqual(analyzeCount, 3, 'ANALYZE_REASON count is exactly 3');
+  assert.strictEqual(evalCount, 1, 'EVALUATE_CREATE count is exactly 1');
+  console.log('  [PASS] Exact cognitive distribution: RECALL_UNDERSTAND=2, APPLY=4, ANALYZE_REASON=3, EVALUATE_CREATE=1');
+
+  // Combined planned items properties, uniqueness, and coverage mapping
+  const seenSeqs = new Set<number>();
+  genPlanDist.plannedItems.forEach((item) => {
+    assert.ok(item.id, 'Planned item has id');
+    assert.ok(item.sequence, 'Planned item has sequence');
+    assert.ok(item.coverageUnitId, 'Planned item has coverageUnitId');
+    assert.ok(!seenSeqs.has(item.sequence), `Sequence ${item.sequence} is unique`);
+    seenSeqs.add(item.sequence);
+  });
+  console.log('  [PASS] All planned items have unique sequence and valid properties');
+
+  // Invalid difficulty total check (requested = 10, total = 8)
+  const genPlanInvalidDiff = resolveAssessmentGenerationPlan({
+    generationSpec: specCase2,
+    constraints: {
+      assemblyMode: 'AUTO_RECOMMENDED',
+      requestedTotalItems: 10,
+      difficultyDistribution: { BASIC: 3, MODERATE: 3, CHALLENGING: 2 },
+    },
+  });
+  assert.strictEqual(genPlanInvalidDiff.resolution.status, 'BLOCKED', 'Invalid difficulty sum is BLOCKED');
+  assert.ok(genPlanInvalidDiff.resolution.issues.some((i) => i.code === 'INVALID_DIFFICULTY_DISTRIBUTION_SUM'), 'Has INVALID_DIFFICULTY_DISTRIBUTION_SUM issue');
+  // Remaining planned items difficulty targets should be undefined, not MODERATE!
+  const invalidDiffTargets = genPlanInvalidDiff.plannedItems.map((it) => it.difficultyTarget);
+  assert.deepStrictEqual(invalidDiffTargets.slice(8), [undefined, undefined], 'Unallocated items remain strictly undefined (no fake MODERATE fill)');
+  console.log('  [PASS] Invalid difficulty distribution sum fails-closed, remaining items are strictly undefined');
+
+  // Invalid cognitive total check (requested = 10, total = 7)
+  const genPlanInvalidCog = resolveAssessmentGenerationPlan({
+    generationSpec: specCase2,
+    constraints: {
+      assemblyMode: 'AUTO_RECOMMENDED',
+      requestedTotalItems: 10,
+      cognitiveDistribution: { RECALL_UNDERSTAND: 2, APPLY: 3, ANALYZE_REASON: 2 },
+    },
+  });
+  assert.strictEqual(genPlanInvalidCog.resolution.status, 'BLOCKED', 'Invalid cognitive sum is BLOCKED');
+  assert.ok(genPlanInvalidCog.resolution.issues.some((i) => i.code === 'INVALID_COGNITIVE_DISTRIBUTION_SUM'), 'Has INVALID_COGNITIVE_DISTRIBUTION_SUM issue');
+  // Remaining planned items cognitive targets should be undefined, not APPLY!
+  const invalidCogTargets = genPlanInvalidCog.plannedItems.map((it) => it.cognitiveDemand);
+  assert.deepStrictEqual(invalidCogTargets.slice(7), [undefined, undefined, undefined], 'Unallocated items remain strictly undefined (no fake APPLY fill)');
+  console.log('  [PASS] Invalid cognitive distribution sum fails-closed, remaining items are strictly undefined');
 
   // =========================================================================
   // SECTION 3: WRITTEN TEST ALL ITEM TYPES & SCORING (SECTION 24)
@@ -202,7 +264,6 @@ async function runSubsystemRegressionTests() {
         prompt: '1 + 1 = ?',
         options: [{ text: '2', isCorrect: true }, { text: '3', isCorrect: false }],
         proposedAnswer: { answerType: 'OPTION', value: '2', optionIndices: [0], explanation: '1 + 1 = 2' },
-        scoringGuideDraft: {},
       },
       {
         coverageUnitId: genPlanCase3.coverageUnits[0].id,
@@ -210,7 +271,6 @@ async function runSubsystemRegressionTests() {
         prompt: 'Pilih bilangan genap',
         options: [{ text: '2', isCorrect: true }, { text: '4', isCorrect: true }, { text: '3', isCorrect: false }],
         proposedAnswer: { answerType: 'MULTIPLE_OPTION', optionIndices: [0, 1] },
-        scoringGuideDraft: {},
       },
       {
         coverageUnitId: genPlanCase3.coverageUnits[0].id,
@@ -218,14 +278,12 @@ async function runSubsystemRegressionTests() {
         prompt: 'Matahari terbit dari timur.',
         options: [{ text: 'Benar', isCorrect: true }, { text: 'Salah', isCorrect: false }],
         proposedAnswer: { answerType: 'OPTION', value: 'Benar', optionIndices: [0] },
-        scoringGuideDraft: {},
       },
       {
         coverageUnitId: genPlanCase3.coverageUnits[0].id,
         itemType: 'SHORT_ANSWER',
         prompt: 'Ibu kota Indonesia adalah...',
         proposedAnswer: { answerType: 'EXACT', value: 'Nusantara' },
-        scoringGuideDraft: {},
       },
       // Unit 1 (requiredCount: 3)
       {
@@ -239,10 +297,9 @@ async function runSubsystemRegressionTests() {
         coverageUnitId: genPlanCase3.coverageUnits[1].id,
         itemType: 'MATCHING',
         prompt: 'Jodohkan hewan dan makanannya',
-        matchingPremises: [{ id: 'p1', text: 'Kambing' }],
-        matchingResponses: [{ id: 'r1', text: 'Rumput' }],
-        proposedAnswer: { answerType: 'MATCHING', matchingPairs: [{ premiseId: 'p1', responseId: 'r1' }] },
-        scoringGuideDraft: {},
+        matchingPremises: [{ id: 'p1', text: 'Kambing' }, { id: 'p2', text: 'Kucing' }],
+        matchingResponses: [{ id: 'r1', text: 'Rumput' }, { id: 'r2', text: 'Ikan' }],
+        proposedAnswer: { answerType: 'MATCHING', matchingPairs: [{ premiseId: 'p1', responseId: 'r1' }, { premiseId: 'p2', responseId: 'r2' }] },
       },
       {
         coverageUnitId: genPlanCase3.coverageUnits[1].id,
@@ -250,24 +307,21 @@ async function runSubsystemRegressionTests() {
         prompt: '2 + 2 = ?',
         options: [{ text: '4', isCorrect: true }, { text: '5', isCorrect: false }],
         proposedAnswer: { answerType: 'OPTION', value: '4', optionIndices: [0] },
-        scoringGuideDraft: {},
       },
       // Unit 2 (requiredCount: 3)
       {
         coverageUnitId: genPlanCase3.coverageUnits[2].id,
         itemType: 'CATEGORY_RESPONSE',
         prompt: 'Kelompokkan benda padat dan cair',
-        categoryStatements: [{ id: 's1', text: 'Batu' }],
-        categoryCategories: [{ id: 'c1', label: 'Padat' }],
-        proposedAnswer: { answerType: 'CATEGORY_RESPONSE', categoryAnswers: [{ statementId: 's1', categoryId: 'c1' }] },
-        scoringGuideDraft: {},
+        categoryStatements: [{ id: 's1', text: 'Batu' }, { id: 's2', text: 'Air' }],
+        categoryCategories: [{ id: 'c1', label: 'Padat' }, { id: 'c2', label: 'Cair' }],
+        proposedAnswer: { answerType: 'CATEGORY_RESPONSE', categoryAnswers: [{ statementId: 's1', categoryId: 'c1' }, { statementId: 's2', categoryId: 'c2' }] },
       },
       {
         coverageUnitId: genPlanCase3.coverageUnits[2].id,
         itemType: 'SHORT_ANSWER',
         prompt: 'Berapakah 5 x 5?',
         proposedAnswer: { answerType: 'EXACT', value: '25' },
-        scoringGuideDraft: {},
       },
       {
         coverageUnitId: genPlanCase3.coverageUnits[2].id,
@@ -275,7 +329,6 @@ async function runSubsystemRegressionTests() {
         prompt: 'Berapakah 10 - 3?',
         options: [{ text: '7', isCorrect: true }, { text: '8', isCorrect: false }],
         proposedAnswer: { answerType: 'OPTION', value: '7', optionIndices: [0] },
-        scoringGuideDraft: {},
       },
     ])
   );
@@ -291,9 +344,125 @@ async function runSubsystemRegressionTests() {
   assert.strictEqual(pkgCase3.answerKeys.length, 10, '10 AnswerKeys created for 10 written test items');
   assert.strictEqual(pkgCase3.scoringGuides.length, 10, '10 ScoringGuides created for 10 written test items');
 
+  // Verify each objective type deterministic scoring semantics
+  const mcGuide = pkgCase3.scoringGuides.find((sg) => {
+    const item = (pkgCase3.instruments[0] as any).items.find((it: any) => it.id === sg.instrumentItemId);
+    return item?.itemType === 'MULTIPLE_CHOICE';
+  });
+  assert.strictEqual(mcGuide?.guideType, 'OBJECTIVE', 'MC has OBJECTIVE guideType');
+  assert.strictEqual(mcGuide?.maxScore, 1, 'MC has maxScore = 1');
+
+  const msGuide = pkgCase3.scoringGuides.find((sg) => {
+    const item = (pkgCase3.instruments[0] as any).items.find((it: any) => it.id === sg.instrumentItemId);
+    return item?.itemType === 'MULTIPLE_SELECT';
+  });
+  assert.strictEqual(msGuide?.guideType, 'OBJECTIVE', 'MULTIPLE_SELECT has OBJECTIVE guideType');
+  assert.strictEqual(msGuide?.maxScore, 1, 'MULTIPLE_SELECT has maxScore = 1');
+
+  const tfGuide = pkgCase3.scoringGuides.find((sg) => {
+    const item = (pkgCase3.instruments[0] as any).items.find((it: any) => it.id === sg.instrumentItemId);
+    return item?.itemType === 'TRUE_FALSE';
+  });
+  assert.strictEqual(tfGuide?.guideType, 'OBJECTIVE', 'TRUE_FALSE has OBJECTIVE guideType');
+  assert.strictEqual(tfGuide?.maxScore, 1, 'TRUE_FALSE has maxScore = 1');
+
+  const saGuide = pkgCase3.scoringGuides.find((sg) => {
+    const item = (pkgCase3.instruments[0] as any).items.find((it: any) => it.id === sg.instrumentItemId);
+    return item?.itemType === 'SHORT_ANSWER';
+  });
+  assert.strictEqual(saGuide?.guideType, 'OBJECTIVE', 'SHORT_ANSWER has OBJECTIVE guideType');
+  assert.strictEqual(saGuide?.maxScore, 1, 'SHORT_ANSWER has maxScore = 1');
+
+  const matchGuide = pkgCase3.scoringGuides.find((sg) => {
+    const item = (pkgCase3.instruments[0] as any).items.find((it: any) => it.id === sg.instrumentItemId);
+    return item?.itemType === 'MATCHING';
+  });
+  assert.strictEqual(matchGuide?.guideType, 'OBJECTIVE', 'MATCHING has OBJECTIVE guideType');
+  assert.strictEqual(matchGuide?.maxScore, 2, 'MATCHING has maxScore = 2 (number of premises)');
+
+  const catGuide = pkgCase3.scoringGuides.find((sg) => {
+    const item = (pkgCase3.instruments[0] as any).items.find((it: any) => idMatch(it.id, sg.instrumentItemId));
+    return item?.itemType === 'CATEGORY_RESPONSE';
+  });
+  function idMatch(a: any, b: any) { return String(a) === String(b); }
+  assert.strictEqual(catGuide?.guideType, 'OBJECTIVE', 'CATEGORY_RESPONSE has OBJECTIVE guideType');
+  assert.strictEqual(catGuide?.maxScore, 2, 'CATEGORY_RESPONSE has maxScore = 2 (number of statements)');
+
+  console.log('  [PASS] All 6 objective item types generate correct deterministic scoring guides without scoringGuideDraft');
+
+  // Short Answer: value missing, explanation exists -> does NOT produce fake exact AnswerKey
+  const providerSA = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanCase3.coverageUnits[0].id,
+        itemType: 'SHORT_ANSWER',
+        prompt: 'Berapakah 2 + 2?',
+        proposedAnswer: { answerType: 'EXACT', explanation: 'Kunci jawaban adalah 4.' }, // value is missing!
+      },
+    ])
+  );
+  const resultSA = await generateAssessmentPackageDraft({
+    generationPlan: genPlanCase3,
+    provider: providerSA,
+  });
+  assert.strictEqual(resultSA.generatedPackage?.answerKeys.length, 0, 'SHORT_ANSWER with missing value produces zero fake exact answer keys');
+  console.log('  [PASS] SHORT_ANSWER with missing value and existing explanation does not fabricate fake exact AnswerKey');
+
+  // Essay: validation on incomplete semantics
+  // Case A: expected response missing, scoring guide exists
+  const providerEssayA = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanCase3.coverageUnits[0].id,
+        itemType: 'ESSAY',
+        prompt: 'Jelaskan mengapa bumi bulat!',
+        proposedAnswer: { answerType: 'EXPECTED_RESPONSE' }, // value missing!
+        scoringGuideDraft: { instructions: 'Berikan skor penuh jika tepat', maxScore: 5 },
+      },
+    ])
+  );
+  const resultEssayA = await generateAssessmentPackageDraft({
+    generationPlan: genPlanCase3,
+    provider: providerEssayA,
+  });
+  const validationEssayA = validateAssessmentPackage(resultEssayA.generatedPackage!, {
+    academicSetting: setting,
+    assessmentPlan: planCase2,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(validationEssayA.valid, false, 'Essay Case A is invalid');
+  assert.ok(validationEssayA.errors.some((err) => err.includes('belum memiliki kunci/rambu jawaban')), 'Essay Case A error contains expected explanation');
+
+  // Case B: expected response exists, scoring guide missing
+  const providerEssayB = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanCase3.coverageUnits[0].id,
+        itemType: 'ESSAY',
+        prompt: 'Jelaskan mengapa bumi bulat!',
+        proposedAnswer: { answerType: 'EXPECTED_RESPONSE', value: 'Karena gravitasi' },
+        scoringGuideDraft: {}, // missing instructions and maxScore!
+      },
+    ])
+  );
+  const resultEssayB = await generateAssessmentPackageDraft({
+    generationPlan: genPlanCase3,
+    provider: providerEssayB,
+  });
+  const validationEssayB = validateAssessmentPackage(resultEssayB.generatedPackage!, {
+    academicSetting: setting,
+    assessmentPlan: planCase2,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(validationEssayB.valid, false, 'Essay Case B is invalid');
+  assert.ok(validationEssayB.errors.some((err) => err.includes('belum memiliki pedoman penskoran')), 'Essay Case B error contains expected explanation');
+  console.log('  [PASS] Essay incomplete semantics cleanly fail package validation');
+
   const answerVerification = await verifyAssessmentPackageAnswers(pkgCase3);
   if (answerVerification.section.status !== 'PASS') {
-    console.error('DEBUG answerVerification findings:', JSON.stringify(answerVerification.section.findings, null, 2));
+    // console.log('DEBUG answerVerification findings:', JSON.stringify(answerVerification.section.findings, null, 2));
   }
   assert.strictEqual(answerVerification.section.status, 'REVIEW', 'Answer Verification is REVIEW with 0 blocking failures');
   console.log('  [PASS] All 7 written test item types generate valid answer keys, scoring guides & pass answer verification');
@@ -303,84 +472,529 @@ async function runSubsystemRegressionTests() {
   // =========================================================================
   console.log('\n--- SECTION 4: NON-WRITTEN ASSESSMENT TYPES & SELF/PEER ---');
 
-  // Self & Peer Assessment (Must NOT have AnswerKeys)
+  // A. SELF_ASSESSMENT
   const planSelf: AssessmentPlan = {
     ...planCase1,
     id: 'plan-self',
     instruments: [{ id: 'inst-self', type: 'SELF_ASSESSMENT' }],
   };
-
   const specSelf = resolveAssessmentGenerationSpec({
     academicSetting: setting,
     assessmentPlan: planSelf,
     tp: mockTP,
     assessmentCriteria: mockCriteria,
   });
-
   const genPlanSelf = resolveAssessmentGenerationPlan({ generationSpec: specSelf });
-  const selfProvider = new MockAIProvider(() =>
+
+  // Valid Self Assessment
+  const selfProviderValid = new MockAIProvider(() =>
     JSON.stringify([
       {
         coverageUnitId: genPlanSelf.coverageUnits[0].id,
         itemType: 'SHORT_ANSWER',
-        prompt: 'Saya memahami materi penjumlahan pecahan dengan baik.',
+        prompt: 'Saya berpartisipasi aktif dalam kegiatan diskusi.',
+        responseScheme: 'Skala Likert 1-4',
       },
     ])
   );
-
-  const resultSelf = await generateAssessmentPackageDraft({
+  const resultSelfValid = await generateAssessmentPackageDraft({
     generationPlan: genPlanSelf,
-    provider: selfProvider,
+    provider: selfProviderValid,
   });
+  const pkgSelfValid = resultSelfValid.generatedPackage!;
+  const valSelfValid = validateAssessmentPackage(pkgSelfValid, {
+    academicSetting: setting,
+    assessmentPlan: planSelf,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valSelfValid.valid, true, 'Valid SELF_ASSESSMENT is valid');
+  assert.strictEqual(pkgSelfValid.answerKeys.length, 0, 'SELF_ASSESSMENT has zero answer keys');
+  console.log('  [PASS] SELF_ASSESSMENT valid case (with statements, responseScheme, no AnswerKey)');
 
-  const pkgSelf = resultSelf.generatedPackage!;
-  assert.strictEqual(pkgSelf.instruments[0].type, 'SELF_ASSESSMENT', 'Self Assessment instrument generated');
-  assert.strictEqual(pkgSelf.answerKeys.length, 0, 'Self Assessment has ZERO answer keys (NO FAKE KEYS)');
-  console.log('  [PASS] SELF_ASSESSMENT generates statements with ZERO fake answer keys');
+  // Invalid Self Assessment (missing responseScheme)
+  const selfProviderInvalid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanSelf.coverageUnits[0].id,
+        itemType: 'SHORT_ANSWER',
+        prompt: 'Saya berpartisipasi aktif dalam kegiatan diskusi.',
+        // missing responseScheme!
+      },
+    ])
+  );
+  const resultSelfInvalid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanSelf,
+    provider: selfProviderInvalid,
+  });
+  const pkgSelfInvalid = resultSelfInvalid.generatedPackage!;
+  const valSelfInvalid = validateAssessmentPackage(pkgSelfInvalid, {
+    academicSetting: setting,
+    assessmentPlan: planSelf,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valSelfInvalid.valid, false, 'Invalid SELF_ASSESSMENT is invalid');
+  assert.ok(valSelfInvalid.errors.some((e) => e.includes('wajib memiliki skema respon')), 'Fails with missing responseScheme error');
+  console.log('  [PASS] SELF_ASSESSMENT incomplete case fails validation');
 
-  // Performance Assessment (Task + Aspects + Rubric)
+
+  // B. PEER_ASSESSMENT
+  const planPeer: AssessmentPlan = {
+    ...planCase1,
+    id: 'plan-peer',
+    instruments: [{ id: 'inst-peer', type: 'PEER_ASSESSMENT' }],
+  };
+  const specPeer = resolveAssessmentGenerationSpec({
+    academicSetting: setting,
+    assessmentPlan: planPeer,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  const genPlanPeer = resolveAssessmentGenerationPlan({ generationSpec: specPeer });
+
+  // Valid Peer Assessment
+  const peerProviderValid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanPeer.coverageUnits[0].id,
+        itemType: 'SHORT_ANSWER',
+        prompt: 'Teman saya membantu menyelesaikan tugas kelompok.',
+        responseScheme: 'Ya / Tidak',
+      },
+    ])
+  );
+  const resultPeerValid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanPeer,
+    provider: peerProviderValid,
+  });
+  const pkgPeerValid = resultPeerValid.generatedPackage!;
+  const valPeerValid = validateAssessmentPackage(pkgPeerValid, {
+    academicSetting: setting,
+    assessmentPlan: planPeer,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valPeerValid.valid, true, 'Valid PEER_ASSESSMENT is valid');
+  assert.strictEqual(pkgPeerValid.answerKeys.length, 0, 'PEER_ASSESSMENT has zero answer keys');
+  console.log('  [PASS] PEER_ASSESSMENT valid case (with statements, responseScheme, no AnswerKey)');
+
+
+  // C. ORAL_TEST
+  const planOral: AssessmentPlan = {
+    ...planCase1,
+    id: 'plan-oral',
+    instruments: [{ id: 'inst-oral', type: 'ORAL_TEST' }],
+  };
+  const specOral = resolveAssessmentGenerationSpec({
+    academicSetting: setting,
+    assessmentPlan: planOral,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  const genPlanOral = resolveAssessmentGenerationPlan({ generationSpec: specOral });
+
+  // Valid Oral Test (with expectedResponse and scoringGuide)
+  const oralProviderValid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanOral.coverageUnits[0].id,
+        prompt: 'Jelaskan perbedaan bilangan bulat dan pecahan!',
+        proposedAnswer: { answerType: 'EXPECTED_RESPONSE', value: 'Bilangan bulat utuh, pecahan bagian dari utuh.' },
+        scoringGuideDraft: { instructions: 'Skor berdasarkan kelengkapan materi.', maxScore: 5 },
+      },
+    ])
+  );
+  const resultOralValid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanOral,
+    provider: oralProviderValid,
+  });
+  const pkgOralValid = resultOralValid.generatedPackage!;
+  const valOralValid = validateAssessmentPackage(pkgOralValid, {
+    academicSetting: setting,
+    assessmentPlan: planOral,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valOralValid.valid, true, 'Valid ORAL_TEST is valid');
+  console.log('  [PASS] ORAL_TEST valid case (prompt, expectedResponse, scoringGuide)');
+
+  // Invalid Oral Test (missing scoringGuide/expectedResponse)
+  const oralProviderInvalid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanOral.coverageUnits[0].id,
+        prompt: 'Jelaskan perbedaan bilangan bulat dan pecahan!',
+        // missing proposedAnswer expected response!
+      },
+    ])
+  );
+  const resultOralInvalid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanOral,
+    provider: oralProviderInvalid,
+  });
+  const pkgOralInvalid = resultOralInvalid.generatedPackage!;
+  const valOralInvalid = validateAssessmentPackage(pkgOralInvalid, {
+    academicSetting: setting,
+    assessmentPlan: planOral,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valOralInvalid.valid, false, 'Invalid ORAL_TEST is invalid');
+  assert.ok(valOralInvalid.errors.some((e) => e.includes('expected response') || e.includes('scoring guide')), 'Fails with appropriate semantic errors');
+  console.log('  [PASS] ORAL_TEST incomplete case fails validation');
+
+
+  // D. PERFORMANCE
   const planPerf: AssessmentPlan = {
     ...planCase1,
     id: 'plan-perf',
     instruments: [{ id: 'inst-perf', type: 'PERFORMANCE' }],
   };
-
   const specPerf = resolveAssessmentGenerationSpec({
     academicSetting: setting,
     assessmentPlan: planPerf,
     tp: mockTP,
     assessmentCriteria: mockCriteria,
   });
-
   const genPlanPerf = resolveAssessmentGenerationPlan({ generationSpec: specPerf });
-  const perfProvider = new MockAIProvider(() =>
+
+  // Valid Performance
+  const perfProviderValid = new MockAIProvider(() =>
     JSON.stringify([
       {
         coverageUnitId: genPlanPerf.coverageUnits[0].id,
         taskTitle: 'Praktik Menimbang Benda',
         taskPrompt: 'Lakukan penimbangan benda menggunakan timbangan secara kelompok.',
-        instructions: 'Ikuti petunjuk keselamatan kerja.',
         aspects: [{ label: 'Persiapan alat', description: 'Menyiapkan timbangan' }],
         rubricDraft: {
           title: 'Rubrik Praktik Menimbang',
           criteria: [{ label: 'Ketepatan hasil', indicator: 'Hasil timbangan akurat' }],
           scale: [{ label: 'Sangat Baik', score: 4, order: 1 }],
         },
-        scoringGuideDraft: { instructions: 'Skor berdasarkan rubrik', maxScore: 100 },
       },
     ])
   );
-
-  const resultPerf = await generateAssessmentPackageDraft({
+  const resultPerfValid = await generateAssessmentPackageDraft({
     generationPlan: genPlanPerf,
-    provider: perfProvider,
+    provider: perfProviderValid,
   });
+  const pkgPerfValid = resultPerfValid.generatedPackage!;
+  const valPerfValid = validateAssessmentPackage(pkgPerfValid, {
+    academicSetting: setting,
+    assessmentPlan: planPerf,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valPerfValid.valid, true, 'Valid PERFORMANCE is valid');
+  console.log('  [PASS] PERFORMANCE valid case (task, aspects, rubric)');
 
-  const pkgPerf = resultPerf.generatedPackage!;
-  assert.strictEqual(pkgPerf.instruments[0].type, 'PERFORMANCE', 'Performance instrument generated');
-  assert.strictEqual(pkgPerf.rubrics.length, 1, 'Performance rubric created');
-  assert.strictEqual(pkgPerf.scoringGuides.length, 1, 'Performance scoring guide created');
-  console.log('  [PASS] PERFORMANCE generates task, aspects, rubric & scoring guide');
+  // Invalid Performance (missing rubric/scoring)
+  const perfProviderInvalid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanPerf.coverageUnits[0].id,
+        taskTitle: 'Praktik Menimbang Benda',
+        taskPrompt: 'Lakukan penimbangan benda menggunakan timbangan secara kelompok.',
+        aspects: [{ label: 'Persiapan alat', description: 'Menyiapkan timbangan' }],
+        // missing rubricDraft & scoringGuideDraft!
+      },
+    ])
+  );
+  const resultPerfInvalid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanPerf,
+    provider: perfProviderInvalid,
+  });
+  const pkgPerfInvalid = resultPerfInvalid.generatedPackage!;
+  const valPerfInvalid = validateAssessmentPackage(pkgPerfInvalid, {
+    academicSetting: setting,
+    assessmentPlan: planPerf,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valPerfInvalid.valid, false, 'Invalid PERFORMANCE is invalid');
+  console.log('  [PASS] PERFORMANCE incomplete case fails validation');
+
+
+  // E. OBSERVATION
+  const planObs: AssessmentPlan = {
+    ...planCase1,
+    id: 'plan-obs',
+    instruments: [{ id: 'inst-obs', type: 'OBSERVATION' }],
+  };
+  const specObs = resolveAssessmentGenerationSpec({
+    academicSetting: setting,
+    assessmentPlan: planObs,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  const genPlanObs = resolveAssessmentGenerationPlan({ generationSpec: specObs });
+
+  // Valid Descriptive Observation (no rubric/indicator needed)
+  const obsProviderDescriptive = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanObs.coverageUnits[0].id,
+        recordingScheme: '', // empty scheme -> descriptive
+        aspects: [{ label: 'Keaktifan siswa' }],
+      },
+    ])
+  );
+  const resultObsDescriptive = await generateAssessmentPackageDraft({
+    generationPlan: genPlanObs,
+    provider: obsProviderDescriptive,
+  });
+  const pkgObsDescriptive = resultObsDescriptive.generatedPackage!;
+  const valObsDescriptive = validateAssessmentPackage(pkgObsDescriptive, {
+    academicSetting: setting,
+    assessmentPlan: planObs,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valObsDescriptive.valid, true, 'Valid Descriptive OBSERVATION is valid');
+  console.log('  [PASS] OBSERVATION descriptive valid case (aspects only)');
+
+  // Invalid Scored Observation (has recordingScheme but missing aspect indicators)
+  const obsProviderScoredInvalid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanObs.coverageUnits[0].id,
+        recordingScheme: 'Skala Penilaian', // scored
+        aspects: [{ label: 'Keaktifan siswa' }], // missing indicator!
+      },
+    ])
+  );
+  const resultObsScoredInvalid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanObs,
+    provider: obsProviderScoredInvalid,
+  });
+  const pkgObsScoredInvalid = resultObsScoredInvalid.generatedPackage!;
+  const valObsScoredInvalid = validateAssessmentPackage(pkgObsScoredInvalid, {
+    academicSetting: setting,
+    assessmentPlan: planObs,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valObsScoredInvalid.valid, false, 'Invalid Scored OBSERVATION is invalid');
+  assert.ok(valObsScoredInvalid.errors.some((e) => e.includes('wajib memiliki indikator')), 'Fails with missing aspect indicators error');
+  console.log('  [PASS] OBSERVATION scored incomplete case fails validation');
+
+
+  // F. ASSIGNMENT
+  const planAssign: AssessmentPlan = {
+    ...planCase1,
+    id: 'plan-assign',
+    instruments: [{ id: 'inst-assign', type: 'ASSIGNMENT' }],
+  };
+  const specAssign = resolveAssessmentGenerationSpec({
+    academicSetting: setting,
+    assessmentPlan: planAssign,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  const genPlanAssign = resolveAssessmentGenerationPlan({ generationSpec: specAssign });
+
+  // Valid Assignment
+  const assignProviderValid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanAssign.coverageUnits[0].id,
+        instructions: 'Kerjakan soal Latihan Bab 1 di buku cetak halaman 25!',
+        rubricDraft: {
+          title: 'Rubrik Penugasan',
+          criteria: [{ label: 'Ketepatan' }],
+          scale: [{ label: 'Selesai', score: 100 }],
+        },
+      },
+    ])
+  );
+  const resultAssignValid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanAssign,
+    provider: assignProviderValid,
+  });
+  const pkgAssignValid = resultAssignValid.generatedPackage!;
+  const valAssignValid = validateAssessmentPackage(pkgAssignValid, {
+    academicSetting: setting,
+    assessmentPlan: planAssign,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valAssignValid.valid, true, 'Valid ASSIGNMENT is valid');
+  console.log('  [PASS] ASSIGNMENT valid case (instructions, rubric)');
+
+  // Invalid Assignment
+  const assignProviderInvalid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanAssign.coverageUnits[0].id,
+        instructions: 'Kerjakan tugas berikut!',
+        // missing scoring/rubric!
+      },
+    ])
+  );
+  const resultAssignInvalid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanAssign,
+    provider: assignProviderInvalid,
+  });
+  const pkgAssignInvalid = resultAssignInvalid.generatedPackage!;
+  const valAssignInvalid = validateAssessmentPackage(pkgAssignInvalid, {
+    academicSetting: setting,
+    assessmentPlan: planAssign,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valAssignInvalid.valid, false, 'Invalid ASSIGNMENT is invalid');
+  console.log('  [PASS] ASSIGNMENT incomplete case fails validation');
+
+
+  // G. PROJECT
+  const planProj: AssessmentPlan = {
+    ...planCase1,
+    id: 'plan-proj',
+    instruments: [{ id: 'inst-proj', type: 'PROJECT' }],
+  };
+  const specProj = resolveAssessmentGenerationSpec({
+    academicSetting: setting,
+    assessmentPlan: planProj,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  const genPlanProj = resolveAssessmentGenerationPlan({ generationSpec: specProj });
+
+  // Valid Project
+  const projProviderValid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanProj.coverageUnits[0].id,
+        taskPrompt: 'Rancanglah mini proyek pengolahan sampah organik.',
+        rubricDraft: {
+          title: 'Rubrik Proyek',
+          criteria: [{ label: 'Perencanaan' }],
+          scale: [{ label: 'Selesai', score: 100 }],
+        },
+      },
+    ])
+  );
+  const resultProjValid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanProj,
+    provider: projProviderValid,
+  });
+  const pkgProjValid = resultProjValid.generatedPackage!;
+  const valProjValid = validateAssessmentPackage(pkgProjValid, {
+    academicSetting: setting,
+    assessmentPlan: planProj,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valProjValid.valid, true, 'Valid PROJECT is valid');
+  console.log('  [PASS] PROJECT valid case (projectBrief, rubric)');
+
+
+  // H. PRODUCT
+  const planProd: AssessmentPlan = {
+    ...planCase1,
+    id: 'plan-prod',
+    instruments: [{ id: 'inst-prod', type: 'PRODUCT' }],
+  };
+  const specProd = resolveAssessmentGenerationSpec({
+    academicSetting: setting,
+    assessmentPlan: planProd,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  const genPlanProd = resolveAssessmentGenerationPlan({ generationSpec: specProd });
+
+  // Valid Product
+  const prodProviderValid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanProd.coverageUnits[0].id,
+        instructions: 'Buatlah maket rumah sehat menggunakan stik es krim.',
+        rubricDraft: {
+          title: 'Rubrik Produk',
+          criteria: [{ label: 'Kreativitas' }],
+          scale: [{ label: 'Selesai', score: 100 }],
+        },
+      },
+    ])
+  );
+  const resultProdValid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanProd,
+    provider: prodProviderValid,
+  });
+  const pkgProdValid = resultProdValid.generatedPackage!;
+  const valProdValid = validateAssessmentPackage(pkgProdValid, {
+    academicSetting: setting,
+    assessmentPlan: planProd,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valProdValid.valid, true, 'Valid PRODUCT is valid');
+  console.log('  [PASS] PRODUCT valid case (productBrief, rubric)');
+
+
+  // I. PORTFOLIO
+  const planPort: AssessmentPlan = {
+    ...planCase1,
+    id: 'plan-port',
+    instruments: [{ id: 'inst-port', type: 'PORTFOLIO' }],
+  };
+  const specPort = resolveAssessmentGenerationSpec({
+    academicSetting: setting,
+    assessmentPlan: planPort,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  const genPlanPort = resolveAssessmentGenerationPlan({ generationSpec: specPort });
+
+  // Valid Portfolio
+  const portProviderValid = new MockAIProvider(() =>
+    JSON.stringify([
+      {
+        coverageUnitId: genPlanPort.coverageUnits[0].id,
+        evidenceRequirements: ['Laporan tugas kelompok', 'Foto hasil penimbangan'],
+        rubricDraft: {
+          title: 'Rubrik Portofolio',
+          criteria: [{ label: 'Kelengkapan bukti' }],
+          scale: [{ label: 'Lengkap', score: 100 }],
+        },
+      },
+    ])
+  );
+  const resultPortValid = await generateAssessmentPackageDraft({
+    generationPlan: genPlanPort,
+    provider: portProviderValid,
+  });
+  const pkgPortValid = resultPortValid.generatedPackage!;
+  const valPortValid = validateAssessmentPackage(pkgPortValid, {
+    academicSetting: setting,
+    assessmentPlan: planPort,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  });
+  assert.strictEqual(valPortValid.valid, true, 'Valid PORTFOLIO is valid');
+  console.log('  [PASS] PORTFOLIO valid case (evidenceRequirements, rubric)');
+
+
+  // J. PACKAGE READINESS GATE FAIL-CLOSED TEST (SECTION 25)
+  console.log('\n--- PACKAGE READINESS GATE FAIL-CLOSED TEST ---');
+  // Confirming a package with semantic error must block and fail-closed
+  const reportInvalidPerf = {
+    assessmentPackageId: pkgPerfInvalid.id,
+    packageRevision: pkgPerfInvalid.revision || 1,
+    overallStatus: 'FAIL',
+    section: { status: 'FAIL', findings: [] },
+  } as any;
+  const confRes = confirmAssessmentPackage(pkgPerfInvalid, {
+    academicSetting: setting,
+    assessmentPlan: planPerf,
+    tp: mockTP,
+    assessmentCriteria: mockCriteria,
+  }, reportInvalidPerf);
+
+  assert.strictEqual(confRes.success, false, 'confirmAssessmentPackage on incomplete semantic package fails');
+  assert.strictEqual(confRes.package.workflowStatus, 'PERLU_DILENGKAPI', 'Invalid package reverts/remains PERLU_DILENGKAPI');
+  console.log('  [PASS] Scored non-written instrument with missing scoring mechanism correctly blocks SIAP confirmation');
 
   // =========================================================================
   // SECTION 5: E2E PERSISTENCE & STORAGE V5 ROUNDTRIP (SECTION 28)

@@ -635,6 +635,7 @@ async function runAudit9C8Regression() {
         title: 'Penilaian Kinerja',
         task: 'Demonstrasikan pembuatan algoritma sorting',
         aspects: [{ id: 'asp-1', label: 'Ketepatan Logika', description: 'Logika sorting benar' }],
+        rubricId: 'rub-perf',
       },
       {
         id: 'inst-obs',
@@ -649,6 +650,7 @@ async function runAudit9C8Regression() {
         title: 'Tugas Rumah',
         instructions: 'Buat resume materi',
         expectedOutput: 'Dokumen PDF 2 halaman',
+        rubricId: 'rub-assign',
       },
       {
         id: 'inst-proj',
@@ -656,6 +658,7 @@ async function runAudit9C8Regression() {
         title: 'Proyek Akhir',
         projectBrief: 'Membuat web sederhana',
         expectedDeliverable: 'Source code di GitHub',
+        rubricId: 'rub-proj',
       },
       {
         id: 'inst-prod',
@@ -663,6 +666,7 @@ async function runAudit9C8Regression() {
         title: 'Produk Karya',
         productBrief: 'Membuat infografis',
         expectedProduct: 'Poster infografis A3',
+        rubricId: 'rub-prod',
       },
       {
         id: 'inst-port',
@@ -670,6 +674,7 @@ async function runAudit9C8Regression() {
         title: 'Portofolio',
         instructions: 'Kumpulkan portofolio',
         evidenceRequirements: ['Laporan praktikum 1-5', 'Refleksi diri'],
+        rubricId: 'rub-port',
       },
       {
         id: 'inst-oral',
@@ -682,6 +687,7 @@ async function runAudit9C8Regression() {
         type: 'SELF_ASSESSMENT',
         title: 'Penilaian Diri',
         items: [{ id: 'si-1', statement: 'Saya memahami materi struktur data', category: 'Pemahaman' }],
+        responseScheme: 'Skala Likert 1-4',
       },
     ];
 
@@ -724,8 +730,68 @@ async function runAudit9C8Regression() {
           maxScore: 10,
           guideType: 'OBJECTIVE',
         },
+        {
+          id: 'sg-oral-1',
+          title: 'Pedoman Penskoran Tes Lisan',
+          instrumentId: 'inst-oral',
+          instrumentItemId: 'oi-1',
+          maxScore: 5,
+          guideType: 'MANUAL',
+          instructions: 'Skor 1-5 berdasarkan ketepatan penjelasan.',
+        },
       ],
-      rubrics: [],
+      rubrics: [
+        {
+          id: 'rub-perf',
+          title: 'Rubrik Kinerja',
+          instrumentId: 'inst-perf',
+          criteria: [{ id: 'c-perf', label: 'Logika', weight: 1 }],
+          scale: [
+            { id: 's-perf-1', label: 'Cukup', order: 1, score: 1 },
+            { id: 's-perf-2', label: 'Baik', order: 2, score: 2 },
+          ],
+        },
+        {
+          id: 'rub-assign',
+          title: 'Rubrik Tugas',
+          instrumentId: 'inst-assign',
+          criteria: [{ id: 'c-assign', label: 'Kelengkapan', weight: 1 }],
+          scale: [
+            { id: 's-assign-1', label: 'Cukup', order: 1, score: 1 },
+            { id: 's-assign-2', label: 'Baik', order: 2, score: 2 },
+          ],
+        },
+        {
+          id: 'rub-proj',
+          title: 'Rubrik Proyek',
+          instrumentId: 'inst-proj',
+          criteria: [{ id: 'c-proj', label: 'Kualitas', weight: 1 }],
+          scale: [
+            { id: 's-proj-1', label: 'Cukup', order: 1, score: 1 },
+            { id: 's-proj-2', label: 'Baik', order: 2, score: 2 },
+          ],
+        },
+        {
+          id: 'rub-prod',
+          title: 'Rubrik Produk',
+          instrumentId: 'inst-prod',
+          criteria: [{ id: 'c-prod', label: 'Kerapian', weight: 1 }],
+          scale: [
+            { id: 's-prod-1', label: 'Cukup', order: 1, score: 1 },
+            { id: 's-prod-2', label: 'Baik', order: 2, score: 2 },
+          ],
+        },
+        {
+          id: 'rub-port',
+          title: 'Rubrik Portofolio',
+          instrumentId: 'inst-port',
+          criteria: [{ id: 'c-port', label: 'Kelengkapan Berkas', weight: 1 }],
+          scale: [
+            { id: 's-port-1', label: 'Cukup', order: 1, score: 1 },
+            { id: 's-port-2', label: 'Baik', order: 2, score: 2 },
+          ],
+        },
+      ],
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
     };
