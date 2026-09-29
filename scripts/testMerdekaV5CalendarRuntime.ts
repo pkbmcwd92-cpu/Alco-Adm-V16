@@ -1172,4 +1172,48 @@ runTest('DT. Full final lifecycle: Default dates -> Generate -> HE/ME > 0 -> Con
   assert.strictEqual(reloadedEff.unknownDays, 0, 'unknownDays must be 0 after reload');
 });
 
+// -----------------------------------------------------------------------------
+// TEST 44: Contract H - source/UI contract contains visible S1/S2 capacity, Calendar status, JP status, and dynamic ATP allocation button label
+// -----------------------------------------------------------------------------
+runTest('DU. Contract H: source/UI contract contains visible S1/S2 capacity, Calendar status, JP status, and dynamic ATP allocation button label', () => {
+  const componentSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/components/administration/TimePlanningManager.tsx'),
+    'utf-8'
+  );
+
+  // S1 & S2 capacity
+  assert.ok(
+    componentSource.includes('autoAllocationReadiness.s1Capacity?.availableJP'),
+    'Must display S1 canonical capacity directly from autoAllocationReadiness'
+  );
+  assert.ok(
+    componentSource.includes('autoAllocationReadiness.s2Capacity?.availableJP'),
+    'Must display S2 canonical capacity directly from autoAllocationReadiness'
+  );
+
+  // S1 & S2 Calendar and JP statuses
+  assert.ok(componentSource.includes('autoAllocationReadiness.s1CalReady'), 'Must display S1 calendar status');
+  assert.ok(componentSource.includes('autoAllocationReadiness.s2CalReady'), 'Must display S2 calendar status');
+  assert.ok(componentSource.includes('autoAllocationReadiness.s1JPReady'), 'Must display S1 JP status');
+  assert.ok(componentSource.includes('autoAllocationReadiness.s2JPReady'), 'Must display S2 JP status');
+
+  // Dynamic button label
+  assert.ok(
+    componentSource.includes('Susun Alokasi Semester {activeSemester} dari ATP Tahunan'),
+    'Button label must dynamically specify active semester from ATP Tahunan'
+  );
+
+  // Visible helper text
+  assert.ok(
+    componentSource.includes('Pembagian ATP tahunan menggunakan kapasitas tersimpan Semester 1 dan Semester 2.'),
+    'Must contain visible helper text explaining S1 & S2 saved capacity partitioning'
+  );
+
+  // Verify "Resmi Canonical" is NOT used
+  assert.ok(
+    !componentSource.includes('Resmi Canonical'),
+    'Must not use "Resmi Canonical" label; use "Tersimpan" / "Draf"'
+  );
+});
+
 console.log(`\nAll ${totalTests} Merdeka V5 Academic Calendar Runtime audit tests PASSED successfully!\n`);

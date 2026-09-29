@@ -97,7 +97,7 @@ export interface TimePlanningManagerProps {
   calendarDays: CalendarDay[];
   timeAllocations: TimeAllocation[];
   semesterJPSetting?: SemesterJPSetting;
-  onSaveCalendar: (calendar: AcademicCalendar, days: CalendarDay[], actualScheduledWeeklyJP?: number | null) => void;
+  onSaveCalendar: (calendar: AcademicCalendar, days: CalendarDay[]) => void;
   onSaveSemesterJPSetting?: (actualWeeklyJP: number | null) => void;
   onSaveTimeAllocations: (allocations: TimeAllocation[]) => void;
 }
@@ -851,7 +851,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
 
     const res = confirmCalendarWorkflow(currentCal, finalDays);
     setWorkflowStatus('CONFIRMED');
-    onSaveCalendar(res.calendar, res.days, jpPerWeek);
+    onSaveCalendar(res.calendar, res.days);
 
     setSaveNotification('Kalender Pendidikan berhasil disimpan & ditetapkan untuk semester ini!');
     setTimeout(() => setSaveNotification(null), 3500);
@@ -1215,13 +1215,9 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
       targetSem = '2';
       planId = autoAllocationReadiness.sem2PlanId;
     } else {
-      if (activeSemester === '1') {
-        targetSem = '1';
-        planId = autoAllocationReadiness.sem1PlanId;
-      } else if (activeSemester === '2') {
-        targetSem = '2';
-        planId = autoAllocationReadiness.sem2PlanId;
-      }
+      setSaveNotification('Gagal menyusun alokasi: identitas SemesterPlan tidak cocok dengan Semester 1 maupun Semester 2.');
+      setTimeout(() => setSaveNotification(null), 3500);
+      return;
     }
 
     // Fail closed guard: targetSem and planId MUST match consistently
@@ -1286,12 +1282,12 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
         targetSem === '1'
           ? autoAllocationReadiness.s1Capacity
           : autoAllocationReadiness.s2Capacity;
-      const totalAvailable = totalAvailableJP ?? targetCap.availableJP ?? 0;
-      const combinedValidation = validateTimeAllocations(updatedAllocations, totalAvailable);
+      const canonicalAvailable = targetCap.availableJP ?? 0;
+      const combinedValidation = validateTimeAllocations(updatedAllocations, canonicalAvailable);
 
       if (combinedValidation.status === 'OVER_ALLOCATED') {
         setSaveNotification(
-          `Gagal menyusun alokasi otomatis: Total alokasi (${combinedValidation.totalAllocatedJP} JP) melebihi kapasitas tersedia (${totalAvailable} JP).`
+          `Gagal menyusun alokasi otomatis: Total alokasi (${combinedValidation.totalAllocatedJP} JP) melebihi kapasitas tersedia (${canonicalAvailable} JP).`
         );
         setTimeout(() => setSaveNotification(null), 4000);
         return;
@@ -1871,11 +1867,11 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
               <span className="text-xs font-medium text-slate-500">Total JP Efektif Tersedia</span>
               {canonicalCapacity?.isReady ? (
                 <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-semibold text-[10px]">
-                  Resmi Canonical
+                  Tersimpan
                 </span>
               ) : (
                 <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded font-semibold text-[10px]">
-                  Proyeksi Draf
+                  Draf
                 </span>
               )}
             </div>
@@ -2365,7 +2361,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                   }`}
                 >
                   <Sparkles className="w-4 h-4 text-indigo-500" />
-                  <span>Susun Alokasi Otomatis</span>
+                  <span>Susun Alokasi Semester {activeSemester} dari ATP Tahunan</span>
                 </button>
 
                 {!autoAllocationReadiness.isReady && autoAllocationReadiness.disabledReason && (
@@ -2473,9 +2469,44 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
               </div>
             </div>
 
+            {/* Canonical Capacity Display for Semester 1 & Semester 2 */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2.5 border-t border-slate-200/80 text-[11px]">
+              <div className="p-2.5 rounded-lg bg-white border border-slate-200 space-y-1">
+                <div className="flex items-center justify-between font-bold text-slate-800">
+                  <span>Semester 1</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${autoAllocationReadiness.s1CalReady && autoAllocationReadiness.s1JPReady ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
+                    {autoAllocationReadiness.s1CalReady && autoAllocationReadiness.s1JPReady ? 'Tersimpan' : 'Belum Lengkap'}
+                  </span>
+                </div>
+                <div className="text-slate-600 space-y-0.5">
+                  <p>Kalender: <strong className={autoAllocationReadiness.s1CalReady ? 'text-emerald-700' : 'text-amber-700'}>{autoAllocationReadiness.s1CalReady ? 'Siap' : 'Belum siap'}</strong></p>
+                  <p>JP Tersimpan: <strong className={autoAllocationReadiness.s1JPReady ? 'text-emerald-700' : 'text-slate-500'}>{autoAllocationReadiness.s1JPReady && autoAllocationReadiness.s1Capacity?.actualScheduledWeeklyJP ? `${autoAllocationReadiness.s1Capacity.actualScheduledWeeklyJP} JP/pekan` : 'Belum disimpan'}</strong></p>
+                  <p>Kapasitas: <strong className={autoAllocationReadiness.s1Capacity?.availableJP ? 'text-indigo-700' : 'text-slate-400'}>{autoAllocationReadiness.s1Capacity?.availableJP ? `${autoAllocationReadiness.s1Capacity.availableJP} JP` : 'Belum tersedia'}</strong></p>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-white border border-slate-200 space-y-1">
+                <div className="flex items-center justify-between font-bold text-slate-800">
+                  <span>Semester 2</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${autoAllocationReadiness.s2CalReady && autoAllocationReadiness.s2JPReady ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
+                    {autoAllocationReadiness.s2CalReady && autoAllocationReadiness.s2JPReady ? 'Tersimpan' : 'Belum Lengkap'}
+                  </span>
+                </div>
+                <div className="text-slate-600 space-y-0.5">
+                  <p>Kalender: <strong className={autoAllocationReadiness.s2CalReady ? 'text-emerald-700' : 'text-amber-700'}>{autoAllocationReadiness.s2CalReady ? 'Siap' : 'Belum siap'}</strong></p>
+                  <p>JP Tersimpan: <strong className={autoAllocationReadiness.s2JPReady ? 'text-emerald-700' : 'text-slate-500'}>{autoAllocationReadiness.s2JPReady && autoAllocationReadiness.s2Capacity?.actualScheduledWeeklyJP ? `${autoAllocationReadiness.s2Capacity.actualScheduledWeeklyJP} JP/pekan` : 'Belum disimpan'}</strong></p>
+                  <p>Kapasitas: <strong className={autoAllocationReadiness.s2Capacity?.availableJP ? 'text-indigo-700' : 'text-slate-400'}>{autoAllocationReadiness.s2Capacity?.availableJP ? `${autoAllocationReadiness.s2Capacity.availableJP} JP` : 'Belum tersedia'}</strong></p>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-600 font-medium">
+              Pembagian ATP tahunan menggunakan kapasitas tersimpan Semester 1 dan Semester 2.
+            </p>
+
             {/* Direct guidance */}
             {autoAllocationReadiness.guidance && (
-              <p className="text-[11px] text-slate-600 flex items-center gap-1.5 pt-1">
+              <p className="text-[11px] text-slate-600 flex items-center gap-1.5 pt-0.5">
                 <Info className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                 <span><strong>Petunjuk:</strong> {autoAllocationReadiness.guidance}</span>
               </p>

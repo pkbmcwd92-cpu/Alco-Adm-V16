@@ -305,4 +305,93 @@ runTest('7. Semester 1 and Semester 2 do NOT mix JP / allocation', () => {
   assert.strictEqual(ctx2.semesterData?.timeAllocation?.length, undefined, 'Sem 2 has no allocations');
 });
 
-console.log('\nAll 7 Calendar -> Semester JP & Time Allocation integration regression tests PASSED 100%!\n');
+// -----------------------------------------------------------------------------
+// TEST 8: Contract A - S1 -> S2 does not retain S1 calendar/JP state
+// -----------------------------------------------------------------------------
+runTest('8. Contract A: S1 -> S2 does not retain S1 calendar/JP state in runtimeContext and resets cleanly', () => {
+  // Populate S1 with calendar and confirmed JP
+  const state = loadStorageV5();
+  state.activeSemesterPlanId = sem1.id;
+  saveStorageV5(state);
+
+  const cal1: AcademicCalendar = {
+    id: `cal-${sem1.id}`,
+    academicSettingId: sem1.id,
+    academicYear: '2026/2027',
+    semester: '1 (Ganjil)',
+    startDate: '2026-07-13',
+    endDate: '2026-12-18',
+    schoolDaysPerWeek: 5,
+    workflowStatus: 'CONFIRMED',
+    updatedAt: new Date().toISOString(),
+  };
+  saveAcademicCalendarV5(sem1.id, { calendar: cal1, days: [] });
+  saveSemesterJPSettingV5(sem1.id, {
+    semesterPlanId: sem1.id,
+    actualScheduledWeeklyJP: 5,
+    source: 'TEACHER_CONFIRMED',
+  });
+
+  const ctxS1 = getRuntimeContextV5();
+  assert.strictEqual(ctxS1.semesterData?.academicCalendar?.calendar.startDate, '2026-07-13');
+  assert.strictEqual(ctxS1.semesterJPSetting?.actualScheduledWeeklyJP, 5);
+
+  // Switch to S2 which has no calendar and no JP
+  const stateS2 = loadStorageV5();
+  stateS2.activeSemesterPlanId = sem2.id;
+  saveStorageV5(stateS2);
+
+  const ctxS2 = getRuntimeContextV5();
+  assert.strictEqual(ctxS2.semesterData?.academicCalendar, undefined, 'S2 must have undefined academicCalendar');
+  assert.strictEqual(ctxS2.semesterJPSetting?.actualScheduledWeeklyJP, null, 'S2 must not retain S1 weekly JP (null)');
+});
+
+// -----------------------------------------------------------------------------
+// TEST 9: Contract D - Calendar save contract does not save/mutate SemesterJPSetting
+// -----------------------------------------------------------------------------
+runTest('9. Contract D: Calendar save contract does not save or mutate SemesterJPSetting', () => {
+  const stateBefore = loadStorageV5();
+  const jpBefore = stateBefore.semesterJPSettings?.find((e) => e.semesterPlanId === sem1.id)?.value;
+
+  const testCal: AcademicCalendar = {
+    id: `cal-test-isolation-${sem1.id}`,
+    academicSettingId: sem1.id,
+    academicYear: '2026/2027',
+    semester: '1 (Ganjil)',
+    startDate: '2026-07-20',
+    endDate: '2026-12-25',
+    schoolDaysPerWeek: 5,
+    workflowStatus: 'CONFIRMED',
+    updatedAt: new Date().toISOString(),
+  };
+
+  // Calling saveAcademicCalendarV5
+  saveAcademicCalendarV5(sem1.id, { calendar: testCal, days: [] });
+
+  const stateAfter = loadStorageV5();
+  const jpAfter = stateAfter.semesterJPSettings?.find((e) => e.semesterPlanId === sem1.id)?.value;
+
+  assert.deepStrictEqual(jpAfter, jpBefore, 'SemesterJPSetting must remain completely unmutated by calendar save');
+});
+
+// -----------------------------------------------------------------------------
+// TEST 10: Contract E - JP save contract does not save/mutate AcademicCalendar
+// -----------------------------------------------------------------------------
+runTest('10. Contract E: JP save contract does not save or mutate AcademicCalendar', () => {
+  const stateBefore = loadStorageV5();
+  const calBefore = stateBefore.semesterData?.academicCalendar?.find((e) => e.semesterPlanId === sem1.id)?.value;
+
+  // Calling saveSemesterJPSettingV5
+  saveSemesterJPSettingV5(sem1.id, {
+    semesterPlanId: sem1.id,
+    actualScheduledWeeklyJP: 6,
+    source: 'TEACHER_CONFIRMED',
+  });
+
+  const stateAfter = loadStorageV5();
+  const calAfter = stateAfter.semesterData?.academicCalendar?.find((e) => e.semesterPlanId === sem1.id)?.value;
+
+  assert.deepStrictEqual(calAfter, calBefore, 'AcademicCalendar data must remain completely unmutated by JP save');
+});
+
+console.log('\nAll Calendar -> Semester JP & Time Allocation integration regression tests PASSED 100%!\n');

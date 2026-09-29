@@ -92,7 +92,7 @@ interface AdministrationHubProps {
   annualJPReference?: AnnualJPReference;
   protaSemesterAllocations?: ProtaSemesterAllocationBundle[];
   initialTab?: AdministrationTab;
-  onSaveCalendar: (calendar: AcademicCalendar, days: CalendarDay[], actualScheduledWeeklyJP?: number | null) => void;
+  onSaveCalendar: (calendar: AcademicCalendar, days: CalendarDay[]) => void;
   onSaveSemesterJPSetting?: (actualWeeklyJP: number | null) => void;
   onSaveTimeAllocations: (allocations: TimeAllocation[]) => void;
   onSaveStudents: (students: Student[]) => void;

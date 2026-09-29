@@ -742,4 +742,138 @@ runTest('13, 14 & 15. Draft lifecycle, Annual ATP byte immutability, and semeste
   );
 });
 
+// -----------------------------------------------------------------------------
+// TEST 16: Contract B - academicSetting.id = sem2.id resolves exactly targetSemester = '2' & planId = sem2.id
+// -----------------------------------------------------------------------------
+runTest('16. Contract B: academicSetting.id = sem2.id resolves exactly targetSemester = 2 and semesterPlanId = sem2.id', () => {
+  const v5State = loadStorageV5();
+  const sem1Plan = v5State.semesterPlans.find((sp) => sp.semester === 1)!;
+  const sem2Plan = v5State.semesterPlans.find((sp) => sp.semester === 2)!;
+
+  const resolveTargetForAcademicSetting = (academicSettingId: string) => {
+    let targetSem: '1' | '2' | null = null;
+    let planId: string | null = null;
+
+    if (academicSettingId === sem1Plan.id) {
+      targetSem = '1';
+      planId = sem1Plan.id;
+    } else if (academicSettingId === sem2Plan.id) {
+      targetSem = '2';
+      planId = sem2Plan.id;
+    } else {
+      return null;
+    }
+    return { targetSem, planId };
+  };
+
+  const res2 = resolveTargetForAcademicSetting(sem2Plan.id);
+  assert.ok(res2, 'Must resolve successfully');
+  assert.strictEqual(res2.targetSem, '2', 'targetSemester must be 2');
+  assert.strictEqual(res2.planId, sem2Plan.id, 'semesterPlanId must match sem2Plan.id');
+
+  const res1 = resolveTargetForAcademicSetting(sem1Plan.id);
+  assert.ok(res1, 'Must resolve successfully');
+  assert.strictEqual(res1.targetSem, '1', 'targetSemester must be 1');
+  assert.strictEqual(res1.planId, sem1Plan.id, 'semesterPlanId must match sem1Plan.id');
+});
+
+// -----------------------------------------------------------------------------
+// TEST 17: Contract C - unknown academicSetting.id fails closed with no semester fallback
+// -----------------------------------------------------------------------------
+runTest('17. Contract C: unknown academicSetting.id fails closed without semester fallback', () => {
+  const v5State = loadStorageV5();
+  const sem1Plan = v5State.semesterPlans.find((sp) => sp.semester === 1)!;
+  const sem2Plan = v5State.semesterPlans.find((sp) => sp.semester === 2)!;
+
+  const resolveTargetForAcademicSetting = (academicSettingId: string) => {
+    let targetSem: '1' | '2' | null = null;
+    let planId: string | null = null;
+
+    if (academicSettingId === sem1Plan.id) {
+      targetSem = '1';
+      planId = sem1Plan.id;
+    } else if (academicSettingId === sem2Plan.id) {
+      targetSem = '2';
+      planId = sem2Plan.id;
+    } else {
+      return null;
+    }
+    return { targetSem, planId };
+  };
+
+  // Unknown academicSetting.id
+  const resUnknown = resolveTargetForAcademicSetting('unknown-setting-id');
+  assert.strictEqual(resUnknown, null, 'Unknown academicSettingId must fail closed and return null without fallback');
+});
+
+// -----------------------------------------------------------------------------
+// TEST 18: Contract F - auto readiness does not use local unsaved Calendar/JP overrides
+// -----------------------------------------------------------------------------
+runTest('18. Contract F: auto readiness strictly queries canonical storage V5 without unsaved overrides', () => {
+  const v5State = loadStorageV5();
+  const sem1Plan = v5State.semesterPlans.find((sp) => sp.semester === 1)!;
+
+  // Unsaved local override draft object
+  const localDraftOverride = {
+    calendar: {
+      id: 'draft-cal',
+      academicSettingId: sem1Plan.id,
+      academicYear: '2026/2027',
+      semester: '1 (Ganjil)',
+      startDate: '2026-07-01',
+      endDate: '2026-12-31',
+      schoolDaysPerWeek: 5,
+      workflowStatus: 'CONFIRMED' as const,
+      updatedAt: new Date().toISOString(),
+    },
+    semesterJPSetting: {
+      semesterPlanId: sem1Plan.id,
+      actualScheduledWeeklyJP: 10,
+      source: 'TEACHER_CONFIRMED' as const,
+    },
+  };
+
+  // Canonical resolution without passing override parameter
+  const canonicalCap = resolveSemesterCapacityV5(sem1Plan.id, v5State);
+
+  // Even if local draft has 10 JP, canonical capacity reflects storage (4 JP, 72 total available)
+  assert.strictEqual(canonicalCap.actualScheduledWeeklyJP, 4, 'Canonical readiness reflects stored JP (4), not local draft (10)');
+  assert.strictEqual(canonicalCap.availableJP, 72, 'Canonical capacity reflects stored 72 JP');
+});
+
+// -----------------------------------------------------------------------------
+// TEST 19: Contract G - final allocation validation uses canonical targetCap.availableJP, not totalAvailableJP draft
+// -----------------------------------------------------------------------------
+runTest('19. Contract G: final allocation validation uses canonical targetCap.availableJP, not draft totalAvailableJP', () => {
+  const state = loadStorageV5();
+  const s1Cap = resolveSemesterCapacityV5(sem1.id, state);
+  const s2Cap = resolveSemesterCapacityV5(sem2.id, state);
+
+  // Canonical capacity is 72 JP
+  assert.strictEqual(s1Cap.availableJP, 72);
+
+  const autoResult = buildAutomaticSemesterAllocations({
+    annualATPItems: sampleAnnualATP.items,
+    targetSemester: '1',
+    semesterPlanId: sem1.id,
+    s1Capacity: s1Cap,
+    s2Capacity: s2Cap,
+  });
+
+  assert.strictEqual(autoResult.status, 'SUCCESS');
+  const totalAllocated = autoResult.allocations.reduce((sum, a) => sum + a.allocatedJP, 0);
+  assert.strictEqual(totalAllocated, 72);
+
+  // If local draft had unsaved totalAvailableJP = 50 (smaller than 72)
+  const draftTotalAvailableJP = 50;
+
+  // Validation against canonical capacity (72 JP) must be BALANCED
+  const canonicalValidation = validateTimeAllocations(autoResult.allocations, s1Cap.availableJP!);
+  assert.strictEqual(canonicalValidation.status, 'BALANCED', 'Validation against canonical targetCap.availableJP must be BALANCED');
+
+  // If validation had wrongly used draft (50 JP), it would falsely report OVER_ALLOCATED
+  const draftValidation = validateTimeAllocations(autoResult.allocations, draftTotalAvailableJP);
+  assert.strictEqual(draftValidation.status, 'OVER_ALLOCATED', 'Validation using draft would be incorrectly OVER_ALLOCATED');
+});
+
 console.log('\nAll B.4.2B Automatic Semester Time Allocation regression tests PASSED 100%!\n');

@@ -719,8 +719,7 @@ export function App() {
   // Handlers for Interconnected Administration Modules (Transitional)
   const handleSaveCalendar = (
     cal: AcademicCalendar,
-    days: CalendarDay[],
-    actualWeeklyJP?: number | null
+    days: CalendarDay[]
   ) => {
     if (!activeSemesterPlan || !activeYearPlan) {
       setAppNotice({
