@@ -241,6 +241,9 @@ export function resolveAssessmentGenerationPlan(
     assemblyMode,
     ...(durationMinutes !== undefined ? { durationMinutes } : {}),
     ...(requestedTotalItems !== undefined ? { requestedTotalItems } : {}),
+    ...(params.constraints?.itemTypeDistribution ? { itemTypeDistribution: params.constraints.itemTypeDistribution } : {}),
+    ...(params.constraints?.difficultyDistribution ? { difficultyDistribution: params.constraints.difficultyDistribution } : {}),
+    ...(params.constraints?.cognitiveDistribution ? { cognitiveDistribution: params.constraints.cognitiveDistribution } : {}),
   };
 
   // 3. Validasi Keberadaan Objectives
@@ -514,6 +517,98 @@ export function resolveAssessmentGenerationPlan(
   }
 
   // 5. Hitung Alokasi Semantik & Evaluasi Alokasi Guru vs Minimum ITEM Coverage
+  const itemUnits = coverageUnits.filter((u) => u.allocationUnit === 'ITEM');
+  const minItemCoverageCount = itemUnits.length;
+  let finalAllocatedCount = minItemCoverageCount;
+
+  if (requestedTotalItems !== undefined && itemUnits.length > 0) {
+    finalAllocatedCount = requestedTotalItems;
+    const N = requestedTotalItems;
+    const M = itemUnits.length;
+
+    if (N < minItemCoverageCount) {
+      planIssues.push({
+        code: 'TEACHER_ITEM_COUNT_UNDER_COVERAGE',
+        severity: 'REVIEW',
+        message: `Jumlah butir yang diminta (${N}) lebih kecil dari jumlah cakupan minimal butir (${minItemCoverageCount}). Jumlah permintaan guru dipertahankan tanpa penaikan otomatis.`,
+      });
+      // Allocate 1 to first N units deterministically sorted by ID, 0 to remaining
+      const sorted = [...itemUnits].sort((a, b) => a.id.localeCompare(b.id));
+      sorted.forEach((u, idx) => {
+        u.recommendedCount = idx < N ? 1 : 0;
+      });
+    } else {
+      if (N > minItemCoverageCount) {
+        planIssues.push({
+          code: 'EXTRA_ITEM_ALLOCATION_REQUIRES_REVIEW',
+          severity: 'REVIEW',
+          message: `Alokasi tambahan (${N - minItemCoverageCount} butir) di atas cakupan minimal butir memerlukan telaah atau penentuan distribusi oleh guru.`,
+        });
+      }
+      // Largest Remainder / Hamilton method for N >= M
+      const exactShare = N / M;
+      const baseQuota = Math.floor(exactShare);
+      const remainder = exactShare - baseQuota;
+      const sumBaseQuotas = baseQuota * M;
+      const deficit = N - sumBaseQuotas;
+
+      // Sort deterministically by remainder descending, tie-break by ID ascending
+      const indexedUnits = itemUnits.map((u, idx) => ({ u, idx, id: u.id, remainder }));
+      indexedUnits.sort((a, b) => {
+        if (b.remainder !== a.remainder) return b.remainder - a.remainder;
+        return a.id.localeCompare(b.id);
+      });
+
+      const bonusSet = new Set(indexedUnits.slice(0, deficit).map((item) => item.u.id));
+
+      itemUnits.forEach((u) => {
+        u.recommendedCount = baseQuota + (bonusSet.has(u.id) ? 1 : 0);
+      });
+    }
+  }
+
+  // Optional: Allocate Difficulty Targets if difficultyDistribution is explicitly constrained
+  if (resolvedConstraints.difficultyDistribution && itemUnits.length > 0) {
+    const diffEntries = Object.entries(resolvedConstraints.difficultyDistribution) as [AssessmentDifficultyTarget, number][];
+    const diffTargets: AssessmentDifficultyTarget[] = [];
+    diffEntries.forEach(([target, count]) => {
+      for (let c = 0; c < (count || 0); c++) {
+        diffTargets.push(target);
+      }
+    });
+
+    if (diffTargets.length > 0) {
+      let dIdx = 0;
+      itemUnits.forEach((u) => {
+        if (!u.difficultyTarget && diffTargets.length > 0) {
+          u.difficultyTarget = diffTargets[dIdx % diffTargets.length];
+          dIdx++;
+        }
+      });
+    }
+  }
+
+  // Optional: Allocate Cognitive Demand Targets if cognitiveDistribution is explicitly constrained
+  if (resolvedConstraints.cognitiveDistribution && itemUnits.length > 0) {
+    const cogEntries = Object.entries(resolvedConstraints.cognitiveDistribution) as [CognitiveDemand, number][];
+    const cogTargets: CognitiveDemand[] = [];
+    cogEntries.forEach(([demand, count]) => {
+      for (let c = 0; c < (count || 0); c++) {
+        cogTargets.push(demand);
+      }
+    });
+
+    if (cogTargets.length > 0) {
+      let cIdx = 0;
+      itemUnits.forEach((u) => {
+        if (!u.cognitiveDemand && cogTargets.length > 0) {
+          u.cognitiveDemand = cogTargets[cIdx % cogTargets.length];
+          cIdx++;
+        }
+      });
+    }
+  }
+
   let itemCount = 0;
   let taskCount = 0;
   let evidenceCount = 0;
@@ -537,29 +632,6 @@ export function resolveAssessmentGenerationPlan(
       default:
         unresolvedCount += 1;
         break;
-    }
-  }
-
-  const minItemCoverageCount = itemCount;
-  let finalAllocatedCount = minItemCoverageCount;
-
-  if (requestedTotalItems !== undefined) {
-    if (requestedTotalItems < minItemCoverageCount) {
-      planIssues.push({
-        code: 'TEACHER_ITEM_COUNT_UNDER_COVERAGE',
-        severity: 'REVIEW',
-        message: `Jumlah butir yang diminta (${requestedTotalItems}) lebih kecil dari jumlah cakupan minimal butir (${minItemCoverageCount}). Jumlah permintaan guru dipertahankan tanpa penaikan otomatis.`,
-      });
-      finalAllocatedCount = requestedTotalItems;
-    } else if (requestedTotalItems > minItemCoverageCount) {
-      planIssues.push({
-        code: 'EXTRA_ITEM_ALLOCATION_REQUIRES_REVIEW',
-        severity: 'REVIEW',
-        message: `Alokasi tambahan (${requestedTotalItems - minItemCoverageCount} butir) di atas cakupan minimal butir memerlukan telaah atau penentuan distribusi oleh guru.`,
-      });
-      finalAllocatedCount = requestedTotalItems;
-    } else {
-      finalAllocatedCount = requestedTotalItems;
     }
   }
 

@@ -466,6 +466,7 @@ export function buildGenerationContract(
     gradeCalibration: spec.generationProfile?.gradeCalibration,
     subjectProfile: spec.subjectProfile,
     sourceContext: spec.sourceContext || [],
+    constraints: plan.constraints,
     units,
   };
 }
@@ -1580,6 +1581,10 @@ export function mapGeneratedUnitsToAssessmentPackage(
             stimulusOrigin: itemUnit.stimulus ? 'AI_SYNTHETIC' : undefined,
             stimulusSource: itemUnit.stimulusSource,
             options: options.length > 0 ? options : undefined,
+            matchingPremises: itemUnit.matchingPremises,
+            matchingResponses: itemUnit.matchingResponses,
+            categoryResponseStatements: itemUnit.categoryStatements ? itemUnit.categoryStatements.map((s) => ({ id: s.id, text: s.text })) : undefined,
+            categoryResponseCategories: itemUnit.categoryCategories ? itemUnit.categoryCategories.map((c) => ({ id: c.id, label: c.label })) : undefined,
             order: uIdx + 1,
           };
           writtenItems.push(item);
@@ -1768,14 +1773,19 @@ export function mapGeneratedUnitsToAssessmentPackage(
           // Scoring Guide for non-essay objective items if draft provided
           if (itemUnit.itemType !== 'ESSAY' && itemUnit.scoringGuideDraft) {
             const sgId = createDeterministicScoringGuideId(instId, itemId);
+            const instText =
+              itemUnit.scoringGuideDraft.instructions ||
+              'Setiap jawaban benar mendapat skor 1, jawaban salah atau tidak diisi mendapat skor 0.';
+            const maxScore = itemUnit.scoringGuideDraft.maxScore || 1;
+
             scoringGuides.push({
               id: sgId,
               title: `Pedoman Penskoran Butir #${uIdx + 1}`,
               instrumentId: instId,
               instrumentItemId: itemId,
               guideType: 'OBJECTIVE',
-              instructions: itemUnit.scoringGuideDraft.instructions,
-              maxScore: itemUnit.scoringGuideDraft.maxScore,
+              instructions: instText,
+              maxScore: maxScore,
             });
           }
         });

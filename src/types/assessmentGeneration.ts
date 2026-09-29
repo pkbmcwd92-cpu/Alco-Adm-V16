@@ -4,6 +4,7 @@ import {
   AssessmentInstrumentType,
   AssessmentStimulusType,
   CognitiveDemand,
+  WrittenAssessmentItemType,
 } from './index';
 
 // ==========================================
@@ -223,6 +224,9 @@ export interface AssessmentGenerationConstraints {
   assemblyMode: AssessmentAssemblyMode;
   durationMinutes?: number;
   requestedTotalItems?: number;
+  itemTypeDistribution?: Partial<Record<WrittenAssessmentItemType, number>>;
+  difficultyDistribution?: Partial<Record<AssessmentDifficultyTarget, number>>;
+  cognitiveDistribution?: Partial<Record<CognitiveDemand, number>>;
 }
 
 export interface AssessmentAllocationSummary {
@@ -344,6 +348,7 @@ export interface AssessmentGenerationContract {
   gradeCalibration?: AssessmentGradeCalibrationProfile;
   subjectProfile: SubjectAssessmentProfile;
   sourceContext: AssessmentSourceContext[];
+  constraints?: AssessmentGenerationConstraints;
   units: AssessmentGenerationContractUnit[];
 }
 

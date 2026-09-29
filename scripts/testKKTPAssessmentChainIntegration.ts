@@ -85,7 +85,7 @@ const profile: TeacherProfile = {
   schoolId: 'sch-1',
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
-};
+} as any;
 
 const school: SchoolData = {
   id: 'sch-1',
