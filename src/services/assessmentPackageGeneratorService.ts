@@ -1029,31 +1029,58 @@ export function parseAndValidateRawAIResponse(
               return;
             }
           } else if (itemType === 'SHORT_ANSWER') {
-            const hasProposedSA = candidate.proposedAnswer && (
-              candidate.proposedAnswer.value || candidate.proposedAnswer.explanation
-            );
-            if (!hasProposedSA) {
+            const hasValidSAValue =
+              typeof candidate.proposedAnswer?.value === 'string' &&
+              candidate.proposedAnswer.value.trim().length > 0;
+
+            if (!hasValidSAValue) {
               issues.push({
                 code: 'MISSING_ITEM_PROPOSED_ANSWER',
                 severity: 'REVIEW',
-                message: `Kandidat ITEM #${idx + 1} (SHORT_ANSWER) wajib memiliki proposedAnswer sebagai jawaban acuan.`,
+                message: `Kandidat ITEM #${idx + 1} (SHORT_ANSWER) wajib memiliki proposedAnswer.value sebagai jawaban acuan.`,
                 objectiveRefId: contractUnit.objectiveRefId,
               });
               return;
             }
           } else if (itemType === 'ESSAY') {
+            let hasEssayError = false;
+
+            const hasEssayExpectedResponse =
+              typeof candidate.proposedAnswer?.value === 'string' &&
+              candidate.proposedAnswer.value.trim().length > 0;
+
+            if (!hasEssayExpectedResponse) {
+              issues.push({
+                code: 'MISSING_ITEM_PROPOSED_ANSWER',
+                severity: 'REVIEW',
+                message: `Kandidat ITEM #${idx + 1} (ESSAY) wajib memiliki proposedAnswer.value sebagai pokok/rambu jawaban acuan.`,
+                objectiveRefId: contractUnit.objectiveRefId,
+              });
+              hasEssayError = true;
+            }
+
             const hasScoringGuideInstructions =
               candidate.scoringGuideDraft &&
               typeof candidate.scoringGuideDraft.instructions === 'string' &&
               candidate.scoringGuideDraft.instructions.trim().length > 0;
 
-            if (!hasProposedAns && !hasScoringGuideInstructions) {
+            const hasValidMaxScore =
+              candidate.scoringGuideDraft &&
+              typeof candidate.scoringGuideDraft.maxScore === 'number' &&
+              Number.isFinite(candidate.scoringGuideDraft.maxScore) &&
+              candidate.scoringGuideDraft.maxScore > 0;
+
+            if (!hasScoringGuideInstructions || !hasValidMaxScore) {
               issues.push({
                 code: 'MISSING_ESSAY_SCORING_GUIDE',
                 severity: 'REVIEW',
-                message: `Kandidat ITEM #${idx + 1} (ESSAY) wajib memiliki scoringGuideDraft dan/atau proposedAnswer sebagai pokok jawaban dan pedoman penskoran.`,
+                message: `Kandidat ITEM #${idx + 1} (ESSAY) wajib memiliki scoringGuideDraft dengan instruksi pedoman penskoran dan maxScore > 0.`,
                 objectiveRefId: contractUnit.objectiveRefId,
               });
+              hasEssayError = true;
+            }
+
+            if (hasEssayError) {
               return;
             }
           } else if (itemType === 'MATCHING') {

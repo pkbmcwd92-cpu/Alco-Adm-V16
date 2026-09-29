@@ -40,6 +40,7 @@ import { resolveAssessmentGenerationPlan } from '../src/services/assessmentGener
 import {
   buildGenerationContract,
   generateAssessmentPackageDraft,
+  parseAndValidateRawAIResponse,
 } from '../src/services/assessmentPackageGeneratorService';
 import { validateAssessmentCoverage } from '../src/services/assessmentCoverageValidationService';
 import { verifyAssessmentPackageAnswers } from '../src/services/assessmentAnswerVerificationService';
@@ -390,75 +391,225 @@ async function runSubsystemRegressionTests() {
 
   console.log('  [PASS] All 6 objective item types generate correct deterministic scoring guides without scoringGuideDraft');
 
-  // Short Answer: value missing, explanation exists -> does NOT produce fake exact AnswerKey
-  const providerSA = new MockAIProvider(() =>
-    JSON.stringify([
-      {
-        coverageUnitId: genPlanCase3.coverageUnits[0].id,
-        itemType: 'SHORT_ANSWER',
-        prompt: 'Berapakah 2 + 2?',
-        proposedAnswer: { answerType: 'EXACT', explanation: 'Kunci jawaban adalah 4.' }, // value is missing!
-      },
-    ])
-  );
-  const resultSA = await generateAssessmentPackageDraft({
-    generationPlan: genPlanCase3,
-    provider: providerSA,
-  });
-  assert.strictEqual(resultSA.generatedPackage?.answerKeys.length, 0, 'SHORT_ANSWER with missing value produces zero fake exact answer keys');
-  console.log('  [PASS] SHORT_ANSWER with missing value and existing explanation does not fabricate fake exact AnswerKey');
+  // =========================================================================
+  // SHORT ANSWER REGRESSION: CASE A, B, C & ANTI-FALLBACK
+  // =========================================================================
+  const cuId0 = genPlanCase3.coverageUnits[0].id;
 
-  // Essay: validation on incomplete semantics
-  // Case A: expected response missing, scoring guide exists
-  const providerEssayA = new MockAIProvider(() =>
-    JSON.stringify([
-      {
-        coverageUnitId: genPlanCase3.coverageUnits[0].id,
-        itemType: 'ESSAY',
-        prompt: 'Jelaskan mengapa bumi bulat!',
-        proposedAnswer: { answerType: 'EXPECTED_RESPONSE' }, // value missing!
-        scoringGuideDraft: { instructions: 'Berikan skor penuh jika tepat', maxScore: 5 },
+  // SA Case A: valid (value present + explanation) -> parser accepts, AnswerKey has exact value, ScoringGuide exists
+  const rawSAValid = JSON.stringify([
+    {
+      coverageUnitId: cuId0,
+      itemType: 'SHORT_ANSWER',
+      prompt: 'Berapakah 2 + 2?',
+      proposedAnswer: {
+        answerType: 'EXACT',
+        value: '4',
+        explanation: 'Karena 2 + 2 = 4.',
       },
-    ])
-  );
-  const resultEssayA = await generateAssessmentPackageDraft({
+    },
+  ]);
+  const parsedSAValid = parseAndValidateRawAIResponse(rawSAValid, contractCase3);
+  assert.strictEqual(parsedSAValid.validatedUnits.length, 1, 'Parser accepts valid SHORT_ANSWER');
+  const providerSAValid = new MockAIProvider(() => rawSAValid);
+  const resultSAValid = await generateAssessmentPackageDraft({
     generationPlan: genPlanCase3,
-    provider: providerEssayA,
+    provider: providerSAValid,
   });
-  const validationEssayA = validateAssessmentPackage(resultEssayA.generatedPackage!, {
-    academicSetting: setting,
-    assessmentPlan: planCase2,
-    tp: mockTP,
-    assessmentCriteria: mockCriteria,
-  });
-  assert.strictEqual(validationEssayA.valid, false, 'Essay Case A is invalid');
-  assert.ok(validationEssayA.errors.some((err) => err.includes('belum memiliki kunci/rambu jawaban')), 'Essay Case A error contains expected explanation');
+  assert.ok(resultSAValid.generatedPackage, 'Package exists for valid SA');
+  const saKey = resultSAValid.generatedPackage!.answerKeys.find((ak) => ak.answerType === 'EXACT');
+  assert.ok(saKey, 'AnswerKey exists for valid SA');
+  assert.strictEqual(saKey!.value, '4', 'AnswerKey value is canonical "4"');
+  assert.notStrictEqual(saKey!.value, 'Karena 2 + 2 = 4.', 'Anti-fallback: SA explanation is NOT the AnswerKey value');
+  assert.strictEqual(saKey!.notes, 'Karena 2 + 2 = 4.', 'SA explanation is preserved in notes');
+  const saGuideValid = resultSAValid.generatedPackage!.scoringGuides.find((sg) => sg.guideType === 'OBJECTIVE');
+  assert.ok(saGuideValid, 'ScoringGuide exists for valid SA');
+  assert.strictEqual(saGuideValid!.maxScore, 1, 'Objective SA scoring guide maxScore is 1');
+  console.log('  [PASS] SHORT_ANSWER Case A: valid value + explanation generates canonical AnswerKey & ScoringGuide');
 
-  // Case B: expected response exists, scoring guide missing
-  const providerEssayB = new MockAIProvider(() =>
-    JSON.stringify([
-      {
-        coverageUnitId: genPlanCase3.coverageUnits[0].id,
-        itemType: 'ESSAY',
-        prompt: 'Jelaskan mengapa bumi bulat!',
-        proposedAnswer: { answerType: 'EXPECTED_RESPONSE', value: 'Karena gravitasi' },
-        scoringGuideDraft: {}, // missing instructions and maxScore!
+  // SA Case B: explanation only (value missing) -> parser reports MISSING_ITEM_PROPOSED_ANSWER, no AnswerKey
+  const rawSAExplanationOnly = JSON.stringify([
+    {
+      coverageUnitId: cuId0,
+      itemType: 'SHORT_ANSWER',
+      prompt: 'Berapakah 2 + 2?',
+      proposedAnswer: {
+        answerType: 'EXACT',
+        explanation: 'Jawabannya adalah 4.',
       },
-    ])
+    },
+  ]);
+  const parsedSAExpOnly = parseAndValidateRawAIResponse(rawSAExplanationOnly, contractCase3);
+  assert.strictEqual(parsedSAExpOnly.validatedUnits.length, 0, 'Parser rejects SA with explanation only');
+  assert.ok(
+    parsedSAExpOnly.issues.some((i) => i.code === 'MISSING_ITEM_PROPOSED_ANSWER'),
+    'Parser reports MISSING_ITEM_PROPOSED_ANSWER for explanation-only SA'
   );
+  const providerSAExpOnly = new MockAIProvider(() => rawSAExplanationOnly);
+  const resultSAExpOnly = await generateAssessmentPackageDraft({
+    generationPlan: genPlanCase3,
+    provider: providerSAExpOnly,
+  });
+  assert.strictEqual(resultSAExpOnly.generatedPackage?.answerKeys?.length || 0, 0, 'No fake AnswerKey created when value is missing');
+  console.log('  [PASS] SHORT_ANSWER Case B: explanation only reports MISSING_ITEM_PROPOSED_ANSWER and creates zero fake AnswerKey');
+
+  // SA Case C: empty whitespace value -> parser reports MISSING_ITEM_PROPOSED_ANSWER, incomplete, no fake AnswerKey
+  const rawSAEmptyValue = JSON.stringify([
+    {
+      coverageUnitId: cuId0,
+      itemType: 'SHORT_ANSWER',
+      prompt: 'Berapakah 2 + 2?',
+      proposedAnswer: {
+        answerType: 'EXACT',
+        value: '   ',
+        explanation: 'Jawabannya adalah 4.',
+      },
+    },
+  ]);
+  const parsedSAEmpty = parseAndValidateRawAIResponse(rawSAEmptyValue, contractCase3);
+  assert.strictEqual(parsedSAEmpty.validatedUnits.length, 0, 'Parser rejects SA with empty whitespace value');
+  assert.ok(
+    parsedSAEmpty.issues.some((i) => i.code === 'MISSING_ITEM_PROPOSED_ANSWER'),
+    'Parser reports MISSING_ITEM_PROPOSED_ANSWER for empty value SA'
+  );
+  const providerSAEmpty = new MockAIProvider(() => rawSAEmptyValue);
+  const resultSAEmpty = await generateAssessmentPackageDraft({
+    generationPlan: genPlanCase3,
+    provider: providerSAEmpty,
+  });
+  assert.strictEqual(resultSAEmpty.generatedPackage?.answerKeys?.length || 0, 0, 'No fake AnswerKey created for empty value SA');
+  console.log('  [PASS] SHORT_ANSWER Case C: empty value reports MISSING_ITEM_PROPOSED_ANSWER and creates zero fake AnswerKey');
+
+  // =========================================================================
+  // ESSAY REGRESSION: CASE A, B, C, D & ANTI-FALLBACK
+  // =========================================================================
+
+  // Essay Case A: lengkap (expected response + scoringGuide instructions + maxScore > 0)
+  const rawEssayLengkap = JSON.stringify([
+    {
+      coverageUnitId: cuId0,
+      itemType: 'ESSAY',
+      prompt: 'Jelaskan mengapa bumi bulat!',
+      proposedAnswer: {
+        answerType: 'EXPECTED_RESPONSE',
+        value: 'Bumi bulat karena gaya gravitasi menarik seluruh massa secara merata ke pusat massa.',
+        explanation: 'Penjelasan ilmiah fisika gravitasi.',
+      },
+      scoringGuideDraft: {
+        instructions: 'Skor penuh jika konsep gravitasi dan bentuk bulat dijelaskan dengan runtut.',
+        maxScore: 10,
+      },
+    },
+  ]);
+  const parsedEssayA = parseAndValidateRawAIResponse(rawEssayLengkap, contractCase3);
+  assert.strictEqual(parsedEssayA.validatedUnits.length, 1, 'Parser accepts complete ESSAY');
+  const providerEssayLengkap = new MockAIProvider(() => rawEssayLengkap);
+  const resultEssayLengkap = await generateAssessmentPackageDraft({
+    generationPlan: genPlanCase3,
+    provider: providerEssayLengkap,
+  });
+  assert.ok(resultEssayLengkap.generatedPackage, 'Package generated for complete ESSAY');
+  const essayKey = resultEssayLengkap.generatedPackage!.answerKeys.find((ak) => ak.answerType === 'EXPECTED_RESPONSE');
+  assert.ok(essayKey, 'ExpectedResponse AnswerKey exists');
+  assert.strictEqual(
+    essayKey!.value,
+    'Bumi bulat karena gaya gravitasi menarik seluruh massa secara merata ke pusat massa.',
+    'AnswerKey value matches canonical expected response'
+  );
+  // Anti-fallback assertions
+  assert.notStrictEqual(essayKey!.value, 'Jelaskan mengapa bumi bulat!', 'Anti-fallback: prompt is NOT the answer key');
+  assert.notStrictEqual(essayKey!.value, 'Penjelasan ilmiah fisika gravitasi.', 'Anti-fallback: explanation is NOT the answer key');
+  assert.notStrictEqual(
+    essayKey!.value,
+    'Skor penuh jika konsep gravitasi dan bentuk bulat dijelaskan dengan runtut.',
+    'Anti-fallback: scoringGuide instructions is NOT the answer key'
+  );
+  const essayGuide = resultEssayLengkap.generatedPackage!.scoringGuides.find((sg) => sg.guideType === 'ESSAY');
+  assert.ok(essayGuide, 'Essay ScoringGuide exists');
+  assert.strictEqual(essayGuide!.maxScore, 10, 'Essay ScoringGuide maxScore is 10');
+  console.log('  [PASS] ESSAY Case A: complete expected response + scoring guide produces canonical AnswerKey and ScoringGuide');
+
+  // Essay Case B: expected response missing, scoring guide exists -> parser reports MISSING_ITEM_PROPOSED_ANSWER
+  const rawEssayB = JSON.stringify([
+    {
+      coverageUnitId: cuId0,
+      itemType: 'ESSAY',
+      prompt: 'Jelaskan mengapa bumi bulat!',
+      proposedAnswer: {
+        answerType: 'EXPECTED_RESPONSE',
+        explanation: 'Penjelasan umum tanpa value.',
+      },
+      scoringGuideDraft: {
+        instructions: 'Berikan skor penuh jika tepat',
+        maxScore: 5,
+      },
+    },
+  ]);
+  const parsedEssayB = parseAndValidateRawAIResponse(rawEssayB, contractCase3);
+  assert.strictEqual(parsedEssayB.validatedUnits.length, 0, 'Parser rejects ESSAY missing expected response');
+  assert.ok(
+    parsedEssayB.issues.some((i) => i.code === 'MISSING_ITEM_PROPOSED_ANSWER'),
+    'Parser reports MISSING_ITEM_PROPOSED_ANSWER when expected response is missing'
+  );
+  const providerEssayB = new MockAIProvider(() => rawEssayB);
   const resultEssayB = await generateAssessmentPackageDraft({
     generationPlan: genPlanCase3,
     provider: providerEssayB,
   });
-  const validationEssayB = validateAssessmentPackage(resultEssayB.generatedPackage!, {
-    academicSetting: setting,
-    assessmentPlan: planCase2,
-    tp: mockTP,
-    assessmentCriteria: mockCriteria,
+  assert.strictEqual(resultEssayB.generatedPackage?.answerKeys?.length || 0, 0, 'No fake AnswerKey created in Essay Case B');
+  console.log('  [PASS] ESSAY Case B: missing expected response reports MISSING_ITEM_PROPOSED_ANSWER');
+
+  // Essay Case C: expected response exists, scoring guide missing/incomplete -> parser reports MISSING_ESSAY_SCORING_GUIDE
+  const rawEssayC = JSON.stringify([
+    {
+      coverageUnitId: cuId0,
+      itemType: 'ESSAY',
+      prompt: 'Jelaskan mengapa bumi bulat!',
+      proposedAnswer: {
+        answerType: 'EXPECTED_RESPONSE',
+        value: 'Karena gravitasi bumi.',
+      },
+      scoringGuideDraft: {}, // missing instructions and maxScore!
+    },
+  ]);
+  const parsedEssayC = parseAndValidateRawAIResponse(rawEssayC, contractCase3);
+  assert.strictEqual(parsedEssayC.validatedUnits.length, 0, 'Parser rejects ESSAY missing scoringGuideDraft');
+  assert.ok(
+    parsedEssayC.issues.some((i) => i.code === 'MISSING_ESSAY_SCORING_GUIDE'),
+    'Parser reports MISSING_ESSAY_SCORING_GUIDE when scoringGuideDraft is incomplete'
+  );
+  const providerEssayC = new MockAIProvider(() => rawEssayC);
+  const resultEssayC = await generateAssessmentPackageDraft({
+    generationPlan: genPlanCase3,
+    provider: providerEssayC,
   });
-  assert.strictEqual(validationEssayB.valid, false, 'Essay Case B is invalid');
-  assert.ok(validationEssayB.errors.some((err) => err.includes('belum memiliki pedoman penskoran')), 'Essay Case B error contains expected explanation');
-  console.log('  [PASS] Essay incomplete semantics cleanly fail package validation');
+  assert.strictEqual(resultEssayC.generatedPackage?.scoringGuides?.filter((s) => s.guideType === 'ESSAY').length || 0, 0, 'No fake Essay ScoringGuide created in Essay Case C');
+  console.log('  [PASS] ESSAY Case C: missing scoring guide reports MISSING_ESSAY_SCORING_GUIDE');
+
+  // Essay Case D: both missing -> parser reports BOTH MISSING_ITEM_PROPOSED_ANSWER and MISSING_ESSAY_SCORING_GUIDE
+  const rawEssayD = JSON.stringify([
+    {
+      coverageUnitId: cuId0,
+      itemType: 'ESSAY',
+      prompt: 'Jelaskan mengapa bumi bulat!',
+      proposedAnswer: {
+        answerType: 'EXPECTED_RESPONSE',
+        explanation: 'Hanya penjelasan saja.',
+      },
+      // scoringGuideDraft missing completely
+    },
+  ]);
+  const parsedEssayD = parseAndValidateRawAIResponse(rawEssayD, contractCase3);
+  assert.strictEqual(parsedEssayD.validatedUnits.length, 0, 'Parser rejects ESSAY when both are missing');
+  assert.ok(
+    parsedEssayD.issues.some((i) => i.code === 'MISSING_ITEM_PROPOSED_ANSWER'),
+    'Parser reports MISSING_ITEM_PROPOSED_ANSWER in Case D'
+  );
+  assert.ok(
+    parsedEssayD.issues.some((i) => i.code === 'MISSING_ESSAY_SCORING_GUIDE'),
+    'Parser reports MISSING_ESSAY_SCORING_GUIDE in Case D'
+  );
+  console.log('  [PASS] ESSAY Case D: both missing reports both semantic issues');
 
   const answerVerification = await verifyAssessmentPackageAnswers(pkgCase3);
   if (answerVerification.section.status !== 'PASS') {
