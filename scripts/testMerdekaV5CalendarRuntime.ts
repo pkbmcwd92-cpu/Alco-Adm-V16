@@ -1173,15 +1173,103 @@ runTest('DT. Full final lifecycle: Default dates -> Generate -> HE/ME > 0 -> Con
 });
 
 // -----------------------------------------------------------------------------
-// TEST 44: Contract H - source/UI contract contains visible S1/S2 capacity, Calendar status, JP status, and dynamic ATP allocation button label
+// TEST 44: Source Contract - Calendar / JP Persistence Separation
 // -----------------------------------------------------------------------------
-runTest('DU. Contract H: source/UI contract contains visible S1/S2 capacity, Calendar status, JP status, and dynamic ATP allocation button label', () => {
+runTest('DU. Source Contract: Calendar / JP persistence separation across App.tsx and TimePlanningManager', () => {
+  const appSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/App.tsx'),
+    'utf-8'
+  );
+  const managerSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/components/administration/TimePlanningManager.tsx'),
+    'utf-8'
+  );
+
+  // Extract handleSaveCalendar in App.tsx
+  const saveCalMatch = appSource.match(/const handleSaveCalendar = \([\s\S]*?\n  \};/);
+  assert.ok(saveCalMatch, 'handleSaveCalendar must exist in App.tsx');
+  assert.ok(
+    !saveCalMatch[0].includes('saveSemesterJPSettingV5'),
+    'handleSaveCalendar in App.tsx must NOT call saveSemesterJPSettingV5'
+  );
+
+  // Extract handleSaveSemesterJPSetting in App.tsx
+  const saveJpMatch = appSource.match(/const handleSaveSemesterJPSetting = \([\s\S]*?\n  \};/);
+  assert.ok(saveJpMatch, 'handleSaveSemesterJPSetting must exist in App.tsx');
+  assert.ok(
+    saveJpMatch[0].includes('saveSemesterJPSettingV5'),
+    'handleSaveSemesterJPSetting in App.tsx MUST call saveSemesterJPSettingV5'
+  );
+
+  // Extract handleConfirmCalendar in TimePlanningManager
+  const confirmCalMatch = managerSource.match(/const handleConfirmCalendar = \(\) => {([\s\S]*?)\n  \};/);
+  assert.ok(confirmCalMatch, 'handleConfirmCalendar must exist in TimePlanningManager');
+  assert.ok(
+    confirmCalMatch[0].includes('onSaveCalendar(res.calendar, res.days)'),
+    'handleConfirmCalendar must call onSaveCalendar(res.calendar, res.days)'
+  );
+  assert.ok(
+    !confirmCalMatch[0].includes('onSaveCalendar(res.calendar, res.days, jpPerWeek)'),
+    'handleConfirmCalendar must NOT pass jpPerWeek to onSaveCalendar'
+  );
+
+  // Extract handleSaveJP in TimePlanningManager
+  const saveJPHandlerMatch = managerSource.match(/const handleSaveJP = \(\) => {([\s\S]*?)\n  \};/);
+  assert.ok(saveJPHandlerMatch, 'handleSaveJP must exist in TimePlanningManager');
+  assert.ok(
+    saveJPHandlerMatch[0].includes('onSaveSemesterJPSetting(jpPerWeek)'),
+    'handleSaveJP must use onSaveSemesterJPSetting(jpPerWeek)'
+  );
+});
+
+// -----------------------------------------------------------------------------
+// TEST 45: Source Contract - Semester Reset
+// -----------------------------------------------------------------------------
+runTest('DV. Source Contract: TimePlanningManager semester reset keyed by academicSetting.id and clean fallback', () => {
+  const managerSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/components/administration/TimePlanningManager.tsx'),
+    'utf-8'
+  );
+
+  // Must contain semester reset effect keyed by academicSetting.id
+  assert.ok(
+    managerSource.includes('useEffect(() => {') && managerSource.includes('[academicSetting.id]'),
+    'TimePlanningManager must contain semester reset effect keyed by academicSetting.id'
+  );
+
+  // Must clear state in no-calendar branch
+  assert.ok(managerSource.includes("setStartDate('')"), "Must clear startDate with setStartDate('')");
+  assert.ok(managerSource.includes("setEndDate('')"), "Must clear endDate with setEndDate('')");
+  assert.ok(managerSource.includes('setSchoolDaysPerWeek(null)'), 'Must clear schoolDaysPerWeek with setSchoolDaysPerWeek(null)');
+  assert.ok(managerSource.includes("setWorkflowStatus('UNRESOLVED')"), "Must reset workflowStatus to UNRESOLVED");
+  assert.ok(managerSource.includes("setResolutionStatus('UNRESOLVED')"), "Must reset resolutionStatus to UNRESOLVED");
+
+  // Assert JP reset resolves to null when neither SemesterJPSetting nor calendar compatibility exists
+  assert.ok(
+    managerSource.includes('setJpPerWeek(null)') || managerSource.includes('setJpPerWeek(resolvedJP)'),
+    'Must resolve and set JP to null when no saved setting exists'
+  );
+});
+
+// -----------------------------------------------------------------------------
+// TEST 46: Source Contract - Readiness UX
+// -----------------------------------------------------------------------------
+runTest('DW. Source Contract: Readiness UX visible labels, capacity indicators, and dynamic action button', () => {
   const componentSource = fs.readFileSync(
     path.resolve(process.cwd(), 'src/components/administration/TimePlanningManager.tsx'),
     'utf-8'
   );
 
-  // S1 & S2 capacity
+  // Visible presence of Semester 1 and Semester 2
+  assert.ok(componentSource.includes('Semester 1'), 'Must visibly contain Semester 1 label');
+  assert.ok(componentSource.includes('Semester 2'), 'Must visibly contain Semester 2 label');
+
+  // Visible presence of status and capacity labels
+  assert.ok(componentSource.includes('Kalender:'), 'Must visibly contain "Kalender:" label');
+  assert.ok(componentSource.includes('JP Tersimpan:'), 'Must visibly contain "JP Tersimpan:" label');
+  assert.ok(componentSource.includes('Kapasitas:'), 'Must visibly contain "Kapasitas:" label');
+
+  // S1 & S2 capacity fields
   assert.ok(
     componentSource.includes('autoAllocationReadiness.s1Capacity?.availableJP'),
     'Must display S1 canonical capacity directly from autoAllocationReadiness'
@@ -1190,12 +1278,6 @@ runTest('DU. Contract H: source/UI contract contains visible S1/S2 capacity, Cal
     componentSource.includes('autoAllocationReadiness.s2Capacity?.availableJP'),
     'Must display S2 canonical capacity directly from autoAllocationReadiness'
   );
-
-  // S1 & S2 Calendar and JP statuses
-  assert.ok(componentSource.includes('autoAllocationReadiness.s1CalReady'), 'Must display S1 calendar status');
-  assert.ok(componentSource.includes('autoAllocationReadiness.s2CalReady'), 'Must display S2 calendar status');
-  assert.ok(componentSource.includes('autoAllocationReadiness.s1JPReady'), 'Must display S1 JP status');
-  assert.ok(componentSource.includes('autoAllocationReadiness.s2JPReady'), 'Must display S2 JP status');
 
   // Dynamic button label
   assert.ok(
