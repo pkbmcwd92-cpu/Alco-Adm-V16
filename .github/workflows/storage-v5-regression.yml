@@ -127,6 +127,9 @@ jobs:
       - name: Test Preview Route Probe
         run: npx tsx scripts/testPreviewRouteProbe.ts
 
+      - name: Test B13 Self Peer Foundation
+        run: npm run test:b13
+
       - name: Run Linter
         run: npm run lint
 
