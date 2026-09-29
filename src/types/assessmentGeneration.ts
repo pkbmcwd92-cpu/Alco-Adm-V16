@@ -266,6 +266,14 @@ export interface AssessmentCoverageUnit {
   issues: AssessmentGenerationIssue[];
 }
 
+export interface AssessmentPlannedItem {
+  id: string;
+  sequence: number;
+  coverageUnitId: string;
+  difficultyTarget?: AssessmentDifficultyTarget;
+  cognitiveDemand?: CognitiveDemand;
+}
+
 export interface AssessmentGenerationPlan {
   academicSettingId?: string;
   generationSpec?: AssessmentGenerationSpec;
@@ -273,6 +281,7 @@ export interface AssessmentGenerationPlan {
   constraints: AssessmentGenerationConstraints;
 
   coverageUnits: AssessmentCoverageUnit[];
+  plannedItems?: AssessmentPlannedItem[];
 
   summary: {
     objectiveCount: number;
@@ -350,6 +359,7 @@ export interface AssessmentGenerationContract {
   sourceContext: AssessmentSourceContext[];
   constraints?: AssessmentGenerationConstraints;
   units: AssessmentGenerationContractUnit[];
+  plannedItems?: AssessmentPlannedItem[];
 }
 
 export interface AssessmentAIGenerationRequest {

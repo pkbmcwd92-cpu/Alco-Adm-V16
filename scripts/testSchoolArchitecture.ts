@@ -57,6 +57,23 @@ async function runAcceptanceTests() {
   // Reset storage to clean state
   localStorage.clear();
   let initialStorage = loadAppStorage();
+  
+  if (initialStorage.schools.length === 0) {
+    createSchool({
+      id: 'sch-default-1',
+      npsn: '12345678',
+      name: 'SD Negeri 1 Contoh',
+      level: 'SD',
+      status: 'NEGERI',
+      province: 'DKI Jakarta',
+      regency: 'Jakarta Pusat',
+      district: 'Gambir',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    initialStorage = loadAppStorage();
+  }
+
   const initialSchool = initialStorage.schools[0];
   let initialProfile = initialStorage.profiles[0];
 

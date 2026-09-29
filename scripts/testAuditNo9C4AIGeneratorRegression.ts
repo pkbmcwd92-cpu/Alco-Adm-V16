@@ -851,7 +851,7 @@ async function runRegressionSuite() {
   assert(writtenInst.items[0].stimulusOrigin === 'AI_SYNTHETIC', 'Case 45: Synthetic stimulus labeled AI_SYNTHETIC');
 
   assert(pkg.answerKeys.length === 2, 'Case 46: 2 Answer keys generated');
-  assert(pkg.scoringGuides.length === 1, 'Case 47: Scoring guide generated for Essay item');
+  assert(pkg.scoringGuides.length === 2, 'Case 47: 2 Scoring guides generated (1 deterministic objective + 1 essay)');
 
   // ----------------------------------------------------
   // SECTION 6: NON-ITEM SEMANTIC INSTRUMENTS (TASK, EVIDENCE, OBSERVATION)

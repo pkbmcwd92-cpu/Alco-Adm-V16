@@ -468,6 +468,7 @@ export function buildGenerationContract(
     sourceContext: spec.sourceContext || [],
     constraints: plan.constraints,
     units,
+    plannedItems: plan.plannedItems,
   };
 }
 
@@ -1692,7 +1693,7 @@ export function mapGeneratedUnitsToAssessmentPackage(
               });
             }
           } else if (itemUnit.itemType === 'SHORT_ANSWER') {
-            const val = itemUnit.proposedAnswer?.value || itemUnit.proposedAnswer?.explanation;
+            const val = itemUnit.proposedAnswer?.value;
             if (val && String(val).trim()) {
               answerKeys.push({
                 id: ansKeyId,
@@ -1707,17 +1708,18 @@ export function mapGeneratedUnitsToAssessmentPackage(
             const val =
               itemUnit.proposedAnswer?.value ||
               itemUnit.proposedAnswer?.explanation ||
-              itemUnit.scoringGuideDraft?.instructions ||
-              `Pokok/contoh jawaban yang diharapkan: ${itemUnit.prompt}`;
+              itemUnit.scoringGuideDraft?.instructions;
 
-            answerKeys.push({
-              id: ansKeyId,
-              instrumentId: instId,
-              instrumentItemId: itemId,
-              answerType: 'EXPECTED_RESPONSE',
-              value: String(val).trim(),
-              notes: itemUnit.proposedAnswer?.explanation,
-            });
+            if (val && String(val).trim()) {
+              answerKeys.push({
+                id: ansKeyId,
+                instrumentId: instId,
+                instrumentItemId: itemId,
+                answerType: 'EXPECTED_RESPONSE',
+                value: String(val).trim(),
+                notes: itemUnit.proposedAnswer?.explanation,
+              });
+            }
 
             // Always create Essay ScoringGuide
             const sgId = createDeterministicScoringGuideId(instId, itemId);
@@ -1770,13 +1772,43 @@ export function mapGeneratedUnitsToAssessmentPackage(
             }
           }
 
-          // Scoring Guide for non-essay objective items if draft provided
-          if (itemUnit.itemType !== 'ESSAY' && itemUnit.scoringGuideDraft) {
+          // Scoring Guide for non-essay objective items (always generated deterministically)
+          if (itemUnit.itemType !== 'ESSAY') {
             const sgId = createDeterministicScoringGuideId(instId, itemId);
-            const instText =
-              itemUnit.scoringGuideDraft.instructions ||
-              'Setiap jawaban benar mendapat skor 1, jawaban salah atau tidak diisi mendapat skor 0.';
-            const maxScore = itemUnit.scoringGuideDraft.maxScore || 1;
+            let instText = 'Setiap jawaban benar mendapat skor 1, jawaban salah atau tidak diisi mendapat skor 0.';
+            let maxScore = 1;
+
+            if (itemUnit.itemType === 'MULTIPLE_CHOICE') {
+              instText = 'Setiap jawaban benar mendapat skor 1, jawaban salah atau tidak diisi mendapat skor 0.';
+              maxScore = 1;
+            } else if (itemUnit.itemType === 'TRUE_FALSE') {
+              instText = 'Setiap jawaban benar mendapat skor 1, jawaban salah atau tidak diisi mendapat skor 0.';
+              maxScore = 1;
+            } else if (itemUnit.itemType === 'MULTIPLE_SELECT') {
+              instText = 'Semua pilihan benar dipilih dan tidak ada pilihan salah dipilih mendapat skor 1, selain itu mendapat skor 0.';
+              maxScore = 1;
+            } else if (itemUnit.itemType === 'MATCHING') {
+              const count = itemUnit.matchingPremises?.length || 1;
+              instText = `Setiap pasangan premis dan respons yang dijodohkan dengan benar mendapat skor 1. Skor maksimal adalah ${count}.`;
+              maxScore = count;
+            } else if (itemUnit.itemType === 'CATEGORY_RESPONSE') {
+              const count = itemUnit.categoryStatements?.length || 1;
+              instText = `Setiap pernyataan yang dikelompokkan ke dalam kategori yang benar mendapat skor 1. Skor maksimal adalah ${count}.`;
+              maxScore = count;
+            } else if (itemUnit.itemType === 'SHORT_ANSWER') {
+              instText = 'Jawaban eksak yang tepat dan sesuai kunci mendapat skor 1, jawaban salah mendapat skor 0.';
+              maxScore = 1;
+            }
+
+            // Use AI/draft overrides if they are specified
+            if (itemUnit.scoringGuideDraft) {
+              if (itemUnit.scoringGuideDraft.instructions) {
+                instText = itemUnit.scoringGuideDraft.instructions;
+              }
+              if (itemUnit.scoringGuideDraft.maxScore !== undefined) {
+                maxScore = itemUnit.scoringGuideDraft.maxScore;
+              }
+            }
 
             scoringGuides.push({
               id: sgId,
@@ -2339,34 +2371,107 @@ export function mapGeneratedUnitsToAssessmentPackage(
         ? expectedInstrumentId
         : undefined;
 
-    const bpItem: AssessmentBlueprintItem = {
-      id: createDeterministicBlueprintId(
-        pkgId,
-        cu.coverageUnitId
-      ),
-      coverageUnitId: cu.coverageUnitId,
-      objectiveRefId: cu.objectiveRefId,
-      criterionId: cu.criterionId,
-      assessmentIndicator:
-        cu.assessmentIndicator ||
-        generatedForUnit[0]?.assessmentIndicator ||
-        undefined,
-      materialOrContext:
-        cu.materialOrContext ||
-        generatedForUnit[0]?.materialOrContext ||
-        undefined,
-      instrumentType: cu.instrumentType,
-      instrumentId: resolvedInstrumentId,
-      instrumentItemIds: itemIds,
-      order: idx + 1,
-      status: 'DRAFT',
-      cognitiveDemand: cu.cognitiveDemand,
-      evidenceType: plan.coverageUnits.find((u) => u.id === cu.coverageUnitId)?.evidenceType,
-      stimulusType: cu.stimulusType,
-      difficultyTarget: cu.difficultyTarget,
-      recommendedItemCount: cu.requiredCount,
-    };
-    blueprintItems.push(bpItem);
+    if (itemIds.length === 0) {
+      // Create a single blueprint item representing the holistic instrument (PROJECT, PRODUCT, PORTFOLIO, ASSIGNMENT)
+      const bpId = createDeterministicBlueprintId(pkgId, cu.coverageUnitId);
+      const bpItem: AssessmentBlueprintItem = {
+        id: bpId,
+        coverageUnitId: cu.coverageUnitId,
+        objectiveRefId: cu.objectiveRefId,
+        criterionId: cu.criterionId,
+        assessmentIndicator:
+          cu.assessmentIndicator ||
+          generatedForUnit[0]?.assessmentIndicator ||
+          undefined,
+        materialOrContext:
+          cu.materialOrContext ||
+          generatedForUnit[0]?.materialOrContext ||
+          undefined,
+        instrumentType: cu.instrumentType,
+        instrumentId: resolvedInstrumentId,
+        instrumentItemIds: [],
+        order: blueprintItems.length + 1,
+        status: 'DRAFT',
+        cognitiveDemand: cu.cognitiveDemand,
+        evidenceType: plan.coverageUnits.find((u) => u.id === cu.coverageUnitId)?.evidenceType,
+        stimulusType: cu.stimulusType,
+        difficultyTarget: cu.difficultyTarget,
+        recommendedItemCount: cu.requiredCount,
+      };
+      blueprintItems.push(bpItem);
+      return;
+    }
+
+    if (cu.allocationUnit !== 'ITEM') {
+      // Create a single blueprint item referencing all aspect/item IDs of this holistic instrument
+      const bpId = createDeterministicBlueprintId(pkgId, cu.coverageUnitId);
+      const bpItem: AssessmentBlueprintItem = {
+        id: bpId,
+        coverageUnitId: cu.coverageUnitId,
+        objectiveRefId: cu.objectiveRefId,
+        criterionId: cu.criterionId,
+        assessmentIndicator:
+          cu.assessmentIndicator ||
+          generatedForUnit[0]?.assessmentIndicator ||
+          undefined,
+        materialOrContext:
+          cu.materialOrContext ||
+          generatedForUnit[0]?.materialOrContext ||
+          undefined,
+        instrumentType: cu.instrumentType,
+        instrumentId: resolvedInstrumentId,
+        instrumentItemIds: itemIds,
+        order: blueprintItems.length + 1,
+        status: 'DRAFT',
+        cognitiveDemand: cu.cognitiveDemand,
+        evidenceType: plan.coverageUnits.find((u) => u.id === cu.coverageUnitId)?.evidenceType,
+        stimulusType: cu.stimulusType,
+        difficultyTarget: cu.difficultyTarget,
+        recommendedItemCount: cu.requiredCount,
+      };
+      blueprintItems.push(bpItem);
+    } else {
+      // Generate individual blueprint items per instrument item to preserve item-level target accuracy
+      itemIds.forEach((itemId, subIdx) => {
+        let plannedItem: any = undefined;
+        if (contract.plannedItems) {
+          const matchingPlannedItems = contract.plannedItems.filter((p) => p.coverageUnitId === cu.coverageUnitId);
+          if (subIdx < matchingPlannedItems.length) {
+            plannedItem = matchingPlannedItems[subIdx];
+          }
+        }
+
+        const bpId = itemIds.length === 1
+          ? createDeterministicBlueprintId(pkgId, cu.coverageUnitId)
+          : `${createDeterministicBlueprintId(pkgId, cu.coverageUnitId)}-${subIdx + 1}`;
+
+        const bpItem: AssessmentBlueprintItem = {
+          id: bpId,
+          coverageUnitId: cu.coverageUnitId,
+          objectiveRefId: cu.objectiveRefId,
+          criterionId: cu.criterionId,
+          assessmentIndicator:
+            cu.assessmentIndicator ||
+            generatedForUnit[0]?.assessmentIndicator ||
+            undefined,
+          materialOrContext:
+            cu.materialOrContext ||
+            generatedForUnit[0]?.materialOrContext ||
+            undefined,
+          instrumentType: cu.instrumentType,
+          instrumentId: resolvedInstrumentId,
+          instrumentItemIds: [itemId],
+          order: blueprintItems.length + 1,
+          status: 'DRAFT',
+          cognitiveDemand: plannedItem?.cognitiveDemand || cu.cognitiveDemand,
+          evidenceType: plan.coverageUnits.find((u) => u.id === cu.coverageUnitId)?.evidenceType,
+          stimulusType: cu.stimulusType,
+          difficultyTarget: plannedItem?.difficultyTarget || cu.difficultyTarget,
+          recommendedItemCount: 1,
+        };
+        blueprintItems.push(bpItem);
+      });
+    }
   });
 
   const pkg: AssessmentPackage = {

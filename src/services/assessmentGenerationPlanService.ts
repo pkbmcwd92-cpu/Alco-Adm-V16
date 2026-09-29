@@ -521,7 +521,13 @@ export function resolveAssessmentGenerationPlan(
   const minItemCoverageCount = itemUnits.length;
   let finalAllocatedCount = minItemCoverageCount;
 
-  if (requestedTotalItems !== undefined && itemUnits.length > 0) {
+  const isRequestedTotalItemsValid = requestedTotalItems !== undefined &&
+    typeof requestedTotalItems === 'number' &&
+    Number.isFinite(requestedTotalItems) &&
+    Number.isInteger(requestedTotalItems) &&
+    requestedTotalItems > 0;
+
+  if (isRequestedTotalItemsValid && itemUnits.length > 0) {
     finalAllocatedCount = requestedTotalItems;
     const N = requestedTotalItems;
     const M = itemUnits.length;
@@ -567,46 +573,130 @@ export function resolveAssessmentGenerationPlan(
     }
   }
 
-  // Optional: Allocate Difficulty Targets if difficultyDistribution is explicitly constrained
-  if (resolvedConstraints.difficultyDistribution && itemUnits.length > 0) {
-    const diffEntries = Object.entries(resolvedConstraints.difficultyDistribution) as [AssessmentDifficultyTarget, number][];
-    const diffTargets: AssessmentDifficultyTarget[] = [];
-    diffEntries.forEach(([target, count]) => {
-      for (let c = 0; c < (count || 0); c++) {
-        diffTargets.push(target);
-      }
-    });
+  // 5a. Validate and Allocate Item-Level Target Distributions (Difficulty & Cognitive Demand)
+  const N_total = typeof finalAllocatedCount === 'number' && Number.isFinite(finalAllocatedCount) && Number.isInteger(finalAllocatedCount) && finalAllocatedCount >= 0
+    ? finalAllocatedCount
+    : 0;
+  const plannedItems: any[] = [];
 
-    if (diffTargets.length > 0) {
-      let dIdx = 0;
-      itemUnits.forEach((u) => {
-        if (!u.difficultyTarget && diffTargets.length > 0) {
-          u.difficultyTarget = diffTargets[dIdx % diffTargets.length];
-          dIdx++;
-        }
+  if (resolvedConstraints.difficultyDistribution && itemUnits.length > 0) {
+    const diffSum = Object.values(resolvedConstraints.difficultyDistribution).reduce((sum, val) => sum + (val || 0), 0);
+    if (diffSum !== N_total) {
+      planIssues.push({
+        code: 'INVALID_DIFFICULTY_DISTRIBUTION_SUM',
+        severity: 'BLOCKING',
+        message: `Total distribusi tingkat kesulitan (${diffSum}) tidak cocok dengan jumlah soal yang diminta/dialokasikan (${N_total}).`,
       });
     }
   }
 
-  // Optional: Allocate Cognitive Demand Targets if cognitiveDistribution is explicitly constrained
   if (resolvedConstraints.cognitiveDistribution && itemUnits.length > 0) {
-    const cogEntries = Object.entries(resolvedConstraints.cognitiveDistribution) as [CognitiveDemand, number][];
-    const cogTargets: CognitiveDemand[] = [];
-    cogEntries.forEach(([demand, count]) => {
-      for (let c = 0; c < (count || 0); c++) {
-        cogTargets.push(demand);
+    const cogSum = Object.values(resolvedConstraints.cognitiveDistribution).reduce((sum, val) => sum + (val || 0), 0);
+    if (cogSum !== N_total) {
+      planIssues.push({
+        code: 'INVALID_COGNITIVE_DISTRIBUTION_SUM',
+        severity: 'BLOCKING',
+        message: `Total distribusi tuntutan kognitif (${cogSum}) tidak cocok dengan jumlah soal yang diminta/dialokasikan (${N_total}).`,
+      });
+    }
+  }
+
+  if (itemUnits.length > 0 && N_total >= 0) {
+    const plannedCoverageUnitIds: string[] = [];
+    const sortedItemUnits = [...itemUnits].sort((a, b) => a.id.localeCompare(b.id));
+    sortedItemUnits.forEach((u) => {
+      const count = u.recommendedCount !== undefined ? u.recommendedCount : 1;
+      for (let i = 0; i < count; i++) {
+        plannedCoverageUnitIds.push(u.id);
       }
     });
 
-    if (cogTargets.length > 0) {
-      let cIdx = 0;
-      itemUnits.forEach((u) => {
-        if (!u.cognitiveDemand && cogTargets.length > 0) {
-          u.cognitiveDemand = cogTargets[cIdx % cogTargets.length];
-          cIdx++;
+    // Pad or trim to match exactly N_total
+    while (plannedCoverageUnitIds.length < N_total) {
+      plannedCoverageUnitIds.push(sortedItemUnits[0]?.id || 'unknown');
+    }
+    if (plannedCoverageUnitIds.length > N_total) {
+      plannedCoverageUnitIds.length = N_total;
+    }
+
+    // Determine difficulty targets for each individual item
+    const plannedDifficulties: (AssessmentDifficultyTarget | undefined)[] = [];
+    if (resolvedConstraints.difficultyDistribution) {
+      const keys: AssessmentDifficultyTarget[] = ['BASIC', 'MODERATE', 'CHALLENGING'];
+      keys.forEach((key) => {
+        const val = resolvedConstraints.difficultyDistribution?.[key] || 0;
+        for (let i = 0; i < val; i++) {
+          plannedDifficulties.push(key);
         }
       });
+      for (let i = plannedDifficulties.length; i < N_total; i++) {
+        const uId = plannedCoverageUnitIds[i];
+        const u = itemUnits.find((unit) => unit.id === uId);
+        plannedDifficulties.push(u?.difficultyTarget || 'MODERATE');
+      }
+    } else {
+      // If no explicit difficulty distribution requested, use whatever is on the coverage unit (no defaults!)
+      for (let i = 0; i < N_total; i++) {
+        const uId = plannedCoverageUnitIds[i];
+        const u = itemUnits.find((unit) => unit.id === uId);
+        plannedDifficulties.push(u?.difficultyTarget);
+      }
     }
+    if (plannedDifficulties.length > N_total) {
+      plannedDifficulties.length = N_total;
+    }
+
+    // Determine cognitive demand targets for each individual item
+    const plannedCognitives: (CognitiveDemand | undefined)[] = [];
+    if (resolvedConstraints.cognitiveDistribution) {
+      const keys: CognitiveDemand[] = ['RECALL_UNDERSTAND', 'APPLY', 'ANALYZE_REASON', 'EVALUATE_CREATE'];
+      keys.forEach((key) => {
+        const val = resolvedConstraints.cognitiveDistribution?.[key] || 0;
+        for (let i = 0; i < val; i++) {
+          plannedCognitives.push(key);
+        }
+      });
+      for (let i = plannedCognitives.length; i < N_total; i++) {
+        const uId = plannedCoverageUnitIds[i];
+        const u = itemUnits.find((unit) => unit.id === uId);
+        plannedCognitives.push(u?.cognitiveDemand || 'APPLY');
+      }
+    } else {
+      // If no explicit cognitive distribution requested, use whatever is on the coverage unit (no defaults!)
+      for (let i = 0; i < N_total; i++) {
+        const uId = plannedCoverageUnitIds[i];
+        const u = itemUnits.find((unit) => unit.id === uId);
+        plannedCognitives.push(u?.cognitiveDemand);
+      }
+    }
+    if (plannedCognitives.length > N_total) {
+      plannedCognitives.length = N_total;
+    }
+
+    // Combine deterministically into plannedItems
+    for (let i = 0; i < N_total; i++) {
+      plannedItems.push({
+        id: `planned-item-${i + 1}`,
+        sequence: i + 1,
+        coverageUnitId: plannedCoverageUnitIds[i],
+        difficultyTarget: plannedDifficulties[i],
+        cognitiveDemand: plannedCognitives[i],
+      });
+    }
+
+    // Update u.difficultyTarget and u.cognitiveDemand with the first item's targets as representatives
+    // ONLY update if they are defined (to preserve undefined status in Case T & Case U when no constraints requested)
+    itemUnits.forEach((u) => {
+      const firstItem = plannedItems.find((item) => item.coverageUnitId === u.id);
+      if (firstItem) {
+        if (firstItem.difficultyTarget !== undefined) {
+          u.difficultyTarget = firstItem.difficultyTarget;
+        }
+        if (firstItem.cognitiveDemand !== undefined) {
+          u.cognitiveDemand = firstItem.cognitiveDemand;
+        }
+      }
+    });
   }
 
   let itemCount = 0;
@@ -661,6 +751,7 @@ export function resolveAssessmentGenerationPlan(
     generationSpec: spec,
     constraints: resolvedConstraints,
     coverageUnits,
+    plannedItems,
     summary: {
       objectiveCount: objectives.length,
       criterionCount: specCriteria.length,
