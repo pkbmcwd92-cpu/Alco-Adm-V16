@@ -82,10 +82,7 @@ const profile: TeacherProfile = {
   id: 'prof-test-1',
   name: 'Guru Test KKTP',
   nip: '1234567890',
-  email: 'guru@test.id',
-  phone: '08123456789',
   schoolId: 'sch-1',
-  isVerified: true,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
@@ -95,11 +92,13 @@ const school: SchoolData = {
   npsn: '12345678',
   name: 'SD Negeri Test KKTP',
   address: 'Jl. Education No. 1',
+  village: 'Cibinong',
   district: 'Cibinong',
-  city: 'Bogor',
+  regency: 'Bogor',
   province: 'Jawa Barat',
   principalName: 'Kepala Sekolah M.Pd.',
   principalNip: '198001012000011001',
+  createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
 
@@ -260,15 +259,18 @@ runTest('5. Legacy Grade Persistence V5', () => {
     id: 'asm-1',
     academicSettingId: sem1Plan.id,
     tpId: 'tp-m1-1',
-    type: 'FORMATIVE',
+    type: 'formatif',
     title: 'Kuis Pecahan',
     date: '2026-08-15',
+    maxScore: 100,
+    createdAt: new Date().toISOString(),
   };
   const result: AssessmentResult = {
     id: 'res-1',
     assessmentId: 'asm-1',
     studentId: 'std-1',
     score: 85,
+    status: 'tercapai',
   };
 
   saveGradeV5(sem1Plan.id, {

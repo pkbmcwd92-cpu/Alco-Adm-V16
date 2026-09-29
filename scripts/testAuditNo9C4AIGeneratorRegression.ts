@@ -571,10 +571,10 @@ async function runRegressionSuite() {
       itemType: 'MULTIPLE_CHOICE',
       prompt: 'Manakah gerak yang termasuk gerak lokomotor?',
       options: [
-        { text: 'Berjalan' },
-        { text: 'Membungkuk' },
-        { text: 'Memutar tangan' },
-        { text: 'Menekuk siku' },
+        { text: 'Berjalan', isCorrect: true },
+        { text: 'Membungkuk', isCorrect: false },
+        { text: 'Memutar tangan', isCorrect: false },
+        { text: 'Menekuk siku', isCorrect: false },
       ],
     },
   ]);
@@ -690,7 +690,7 @@ async function runRegressionSuite() {
         allocationUnit: unit0.allocationUnit,
         itemType: 'MULTIPLE_CHOICE',
         prompt: 'Soal Unit 0 yang valid',
-        options: [{ text: 'A' }, { text: 'B' }],
+        options: [{ text: 'A', isCorrect: true }, { text: 'B', isCorrect: false }],
       },
       // Unit 1 is completely omitted by AI
     ])
@@ -1342,7 +1342,7 @@ async function runRegressionSuite() {
       assessmentIndicator: 'Indikator Hasil AI',
       itemType: 'MULTIPLE_CHOICE',
       prompt: 'Soal dengan indikator AI',
-      options: [{ text: 'A' }, { text: 'B' }],
+      options: [{ text: 'A', isCorrect: true }, { text: 'B', isCorrect: false }],
     },
   ]);
   const parseResBC = parseAndValidateRawAIResponse(aiIndJson, contract);
@@ -1359,7 +1359,7 @@ async function runRegressionSuite() {
         allocationUnit: unitBC.allocationUnit,
         itemType: 'MULTIPLE_CHOICE',
         prompt: 'Soal tanpa indikator sama sekali',
-        options: [{ text: 'A' }, { text: 'B' }],
+        options: [{ text: 'A', isCorrect: true }, { text: 'B', isCorrect: false }],
       },
     ])
   );

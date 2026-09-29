@@ -500,20 +500,51 @@ ATURAN GENERASI KETAT:
    - coverageUnitId: WAJIB.
    - itemType: WAJIB. Pilihan valid: MULTIPLE_CHOICE, MULTIPLE_SELECT, TRUE_FALSE, SHORT_ANSWER, ESSAY, MATCHING, CATEGORY_RESPONSE.
    - prompt: WAJIB, berupa teks soal.
-   - options: WAJIB untuk MULTIPLE_CHOICE dan MULTIPLE_SELECT, minimal 2 opsi.
    - stimulus: opsional.
-   - proposedAnswer: opsional tetapi sangat dianjurkan jika jawaban dapat ditentukan.
-   - scoringGuideDraft: gunakan bila bentuk soal memerlukan pedoman penskoran.
+   
+   ATURAN KUNCI JAWABAN & PEDOMAN PENSKORAN WAJIB PER ITEM_TYPE:
+   1. MULTIPLE_CHOICE:
+      - options: WAJIB minimal 2 opsi, dengan TEPAT SATU opsi memiliki isCorrect: true (lainnya false).
+      - proposedAnswer: WAJIB dengan answerType: "OPTION", optionIndices: [index_opsi_benar], value (teks opsi benar), dan explanation.
+   2. MULTIPLE_SELECT:
+      - options: WAJIB minimal 2 opsi, dengan SATU ATAU LEBIH opsi memiliki isCorrect: true.
+      - proposedAnswer: WAJIB dengan answerType: "MULTIPLE_OPTION", optionIndices: [array_index_opsi_benar], dan explanation.
+   3. TRUE_FALSE:
+      - options: WAJIB 2 opsi (Benar / Salah) dengan tepat satu isCorrect: true.
+      - proposedAnswer: WAJIB dengan answerType: "OPTION" atau "EXACT", value ("Benar" atau "Salah"), dan explanation.
+   4. SHORT_ANSWER:
+      - proposedAnswer: WAJIB dengan answerType: "EXACT" atau "EXPECTED_RESPONSE", value (teks jawaban singkat yang benar), dan explanation.
+   5. ESSAY:
+      - proposedAnswer: WAJIB dengan answerType: "EXPECTED_RESPONSE", value (pokok/contoh jawaban yang diharapkan), dan explanation.
+      - scoringGuideDraft: WAJIB dengan instructions (pedoman/kriteria penskoran uraian) dan maxScore (skor maksimal, misal 10 atau 100).
+   6. MATCHING:
+      - matchingPremises: WAJIB minimal 2 premis dengan id dan text.
+      - matchingResponses: WAJIB minimal 2 respon dengan id dan text.
+      - proposedAnswer: WAJIB dengan answerType: "MATCHING", matchingPairs: array pasangan premiseId dan responseId.
+   7. CATEGORY_RESPONSE:
+      - categoryCategories: WAJIB minimal 2 kategori dengan id dan label.
+      - categoryStatements: WAJIB minimal 2 pernyataan dengan id dan text.
+      - proposedAnswer: WAJIB dengan answerType: "CATEGORY_RESPONSE", categoryAnswers: array pasangan statementId dan categoryId.
 
-   Untuk pilihan ganda:
+   CATATAN SANGAT PENTING:
+   Setiap butir soal Tes Tertulis TANPA informasi penilaian (jawaban benar / proposedAnswer / scoringGuideDraft) dianggap DRAF TIDAK LENGKAP. AI DILARANG menghasilkan soal tanpa kunci jawaban atau pedoman penskoran.
+
+   Contoh Pilihan Ganda Lengkap:
    {
      "coverageUnitId": "...",
      "itemType": "MULTIPLE_CHOICE",
-     "prompt": "...",
+     "prompt": "Berapakah hasil dari 2 + 3?",
      "options": [
-       { "text": "...", "isCorrect": true },
-       { "text": "...", "isCorrect": false }
-     ]
+       { "text": "4", "isCorrect": false },
+       { "text": "5", "isCorrect": true },
+       { "text": "6", "isCorrect": false }
+     ],
+     "proposedAnswer": {
+       "answerType": "OPTION",
+       "optionIndices": [1],
+       "value": "5",
+       "explanation": "2 ditambah 3 sama dengan 5."
+     }
    }
 
    B. ITEM — ORAL_TEST
@@ -973,6 +1004,80 @@ export function parseAndValidateRawAIResponse(
           }
 
           parsedOptions = validOpts;
+        }
+
+        // Evaluation Completeness Validation for WRITTEN_TEST Items
+        if (contractUnit.instrumentType === 'WRITTEN_TEST') {
+          const hasOptionCorrect = parsedOptions?.some((o) => o.isCorrect === true);
+          const hasProposedAns = candidate.proposedAnswer && (
+            candidate.proposedAnswer.value ||
+            (Array.isArray(candidate.proposedAnswer.optionIndices) && candidate.proposedAnswer.optionIndices.length > 0) ||
+            (Array.isArray(candidate.proposedAnswer.matchingPairs) && candidate.proposedAnswer.matchingPairs.length > 0) ||
+            (Array.isArray(candidate.proposedAnswer.categoryAnswers) && candidate.proposedAnswer.categoryAnswers.length > 0)
+          );
+
+          if (itemType === 'MULTIPLE_CHOICE' || itemType === 'MULTIPLE_SELECT' || itemType === 'TRUE_FALSE') {
+            if (!hasOptionCorrect && !hasProposedAns) {
+              issues.push({
+                code: 'MISSING_ITEM_ANSWER_KEY',
+                severity: 'REVIEW',
+                message: `Kandidat ITEM #${idx + 1} (${itemType}) tidak memiliki jawaban benar pada options atau proposedAnswer.`,
+                objectiveRefId: contractUnit.objectiveRefId,
+              });
+              return;
+            }
+          } else if (itemType === 'SHORT_ANSWER') {
+            if (!hasProposedAns) {
+              issues.push({
+                code: 'MISSING_ITEM_PROPOSED_ANSWER',
+                severity: 'REVIEW',
+                message: `Kandidat ITEM #${idx + 1} (SHORT_ANSWER) wajib memiliki proposedAnswer sebagai jawaban acuan.`,
+                objectiveRefId: contractUnit.objectiveRefId,
+              });
+              return;
+            }
+          } else if (itemType === 'ESSAY') {
+            const hasScoringGuideInstructions =
+              candidate.scoringGuideDraft &&
+              typeof candidate.scoringGuideDraft.instructions === 'string' &&
+              candidate.scoringGuideDraft.instructions.trim().length > 0;
+
+            if (!hasProposedAns && !hasScoringGuideInstructions) {
+              issues.push({
+                code: 'MISSING_ESSAY_SCORING_GUIDE',
+                severity: 'REVIEW',
+                message: `Kandidat ITEM #${idx + 1} (ESSAY) wajib memiliki scoringGuideDraft dan/atau proposedAnswer sebagai pokok jawaban dan pedoman penskoran.`,
+                objectiveRefId: contractUnit.objectiveRefId,
+              });
+              return;
+            }
+          } else if (itemType === 'MATCHING') {
+            const hasMatchingPairs =
+              hasProposedAns || (Array.isArray(candidate.matchingPairs) && candidate.matchingPairs.length > 0);
+            if (!hasMatchingPairs) {
+              issues.push({
+                code: 'MISSING_MATCHING_PAIRS',
+                severity: 'REVIEW',
+                message: `Kandidat ITEM #${idx + 1} (MATCHING) wajib memiliki pasangan kunci jawaban (matchingPairs).`,
+                objectiveRefId: contractUnit.objectiveRefId,
+              });
+              return;
+            }
+          } else if (itemType === 'CATEGORY_RESPONSE') {
+            const hasCatAnswers =
+              hasProposedAns ||
+              (Array.isArray(candidate.categoryStatements) &&
+                candidate.categoryStatements.some((s: any) => s && s.correctCategoryId));
+            if (!hasCatAnswers) {
+              issues.push({
+                code: 'MISSING_CATEGORY_ANSWERS',
+                severity: 'REVIEW',
+                message: `Kandidat ITEM #${idx + 1} (CATEGORY_RESPONSE) wajib memiliki kunci jawaban kategori (categoryAnswers).`,
+                objectiveRefId: contractUnit.objectiveRefId,
+              });
+              return;
+            }
+          }
         }
 
         const scoringGuideDraft =
@@ -1479,38 +1584,196 @@ export function mapGeneratedUnitsToAssessmentPackage(
           };
           writtenItems.push(item);
 
-          // Answer Key (Proposed / Unverified)
-          if (itemUnit.proposedAnswer) {
-            const ansKeyId = createDeterministicAnswerKeyId(instId, itemId);
-            const matchedOptionIds = options
-              .filter((opt, oIdx) => {
-                if (itemUnit.proposedAnswer?.optionIndices?.includes(oIdx)) return true;
-                if (itemUnit.proposedAnswer?.value && opt.text.includes(itemUnit.proposedAnswer.value)) return true;
-                if (opt.isCorrect) return true;
-                return false;
-              })
-              .map((o) => o.id);
+          // Answer Key (Proposed / Unverified) & Sync Options
+          const ansKeyId = createDeterministicAnswerKeyId(instId, itemId);
+
+          if (itemUnit.itemType === 'MULTIPLE_CHOICE') {
+            let matchedOptionIds: string[] = [];
+            if (itemUnit.proposedAnswer?.optionIndices && itemUnit.proposedAnswer.optionIndices.length > 0) {
+              matchedOptionIds = itemUnit.proposedAnswer.optionIndices
+                .map((idx) => options[idx]?.id)
+                .filter((id): id is string => Boolean(id));
+            }
+            if (matchedOptionIds.length === 0 && options.some((o) => o.isCorrect)) {
+              matchedOptionIds = options.filter((o) => o.isCorrect).map((o) => o.id);
+            }
+            if (matchedOptionIds.length === 0 && itemUnit.proposedAnswer?.value) {
+              const valStr = String(itemUnit.proposedAnswer.value).trim().toLowerCase();
+              const matched = options.find(
+                (o) => o.text.trim().toLowerCase() === valStr || o.label.toLowerCase() === valStr
+              );
+              if (matched) matchedOptionIds = [matched.id];
+            }
+
+            if (matchedOptionIds.length > 0) {
+              // Synchronize options.isCorrect strictly with AnswerKey optionIds to prevent dual-source conflict
+              options.forEach((opt) => {
+                opt.isCorrect = matchedOptionIds.includes(opt.id);
+              });
+
+              const targetOpt = options.find((o) => o.id === matchedOptionIds[0]);
+              answerKeys.push({
+                id: ansKeyId,
+                instrumentId: instId,
+                instrumentItemId: itemId,
+                answerType: 'OPTION',
+                optionIds: matchedOptionIds.slice(0, 1),
+                value: targetOpt?.text || targetOpt?.label || itemUnit.proposedAnswer?.value,
+                notes: itemUnit.proposedAnswer?.explanation,
+              });
+            }
+          } else if (itemUnit.itemType === 'MULTIPLE_SELECT') {
+            let matchedOptionIds: string[] = [];
+            if (itemUnit.proposedAnswer?.optionIndices && itemUnit.proposedAnswer.optionIndices.length > 0) {
+              matchedOptionIds = itemUnit.proposedAnswer.optionIndices
+                .map((idx) => options[idx]?.id)
+                .filter((id): id is string => Boolean(id));
+            }
+            if (matchedOptionIds.length === 0 && options.some((o) => o.isCorrect)) {
+              matchedOptionIds = options.filter((o) => o.isCorrect).map((o) => o.id);
+            }
+
+            if (matchedOptionIds.length > 0) {
+              options.forEach((opt) => {
+                opt.isCorrect = matchedOptionIds.includes(opt.id);
+              });
+
+              const selectedTexts = options
+                .filter((o) => matchedOptionIds.includes(o.id))
+                .map((o) => o.text)
+                .join(', ');
+
+              answerKeys.push({
+                id: ansKeyId,
+                instrumentId: instId,
+                instrumentItemId: itemId,
+                answerType: 'MULTIPLE_OPTION',
+                optionIds: matchedOptionIds,
+                value: selectedTexts || itemUnit.proposedAnswer?.value,
+                notes: itemUnit.proposedAnswer?.explanation,
+              });
+            }
+          } else if (itemUnit.itemType === 'TRUE_FALSE') {
+            let matchedOptionIds: string[] = [];
+            let ansVal = itemUnit.proposedAnswer?.value;
+
+            if (options.length > 0) {
+              if (itemUnit.proposedAnswer?.optionIndices && itemUnit.proposedAnswer.optionIndices.length > 0) {
+                matchedOptionIds = itemUnit.proposedAnswer.optionIndices
+                  .map((idx) => options[idx]?.id)
+                  .filter((id): id is string => Boolean(id));
+              }
+              if (matchedOptionIds.length === 0 && options.some((o) => o.isCorrect)) {
+                matchedOptionIds = options.filter((o) => o.isCorrect).map((o) => o.id);
+              }
+              if (matchedOptionIds.length > 0) {
+                options.forEach((opt) => {
+                  opt.isCorrect = matchedOptionIds.includes(opt.id);
+                });
+                const targetOpt = options.find((o) => o.id === matchedOptionIds[0]);
+                if (targetOpt) ansVal = targetOpt.text;
+              }
+            }
+
+            if (matchedOptionIds.length > 0 || (ansVal && String(ansVal).trim())) {
+              answerKeys.push({
+                id: ansKeyId,
+                instrumentId: instId,
+                instrumentItemId: itemId,
+                answerType: matchedOptionIds.length > 0 ? 'OPTION' : 'EXACT',
+                optionIds: matchedOptionIds.length > 0 ? matchedOptionIds : undefined,
+                value: String(ansVal || '').trim(),
+                notes: itemUnit.proposedAnswer?.explanation,
+              });
+            }
+          } else if (itemUnit.itemType === 'SHORT_ANSWER') {
+            const val = itemUnit.proposedAnswer?.value || itemUnit.proposedAnswer?.explanation;
+            if (val && String(val).trim()) {
+              answerKeys.push({
+                id: ansKeyId,
+                instrumentId: instId,
+                instrumentItemId: itemId,
+                answerType: itemUnit.proposedAnswer?.answerType || 'EXACT',
+                value: String(val).trim(),
+                notes: itemUnit.proposedAnswer?.explanation,
+              });
+            }
+          } else if (itemUnit.itemType === 'ESSAY') {
+            const val =
+              itemUnit.proposedAnswer?.value ||
+              itemUnit.proposedAnswer?.explanation ||
+              itemUnit.scoringGuideDraft?.instructions ||
+              `Pokok/contoh jawaban yang diharapkan: ${itemUnit.prompt}`;
 
             answerKeys.push({
               id: ansKeyId,
               instrumentId: instId,
               instrumentItemId: itemId,
-              answerType: itemUnit.proposedAnswer.answerType,
-              value: itemUnit.proposedAnswer.value,
-              optionIds: matchedOptionIds.length > 0 ? matchedOptionIds : undefined,
-              notes: itemUnit.proposedAnswer.explanation,
+              answerType: 'EXPECTED_RESPONSE',
+              value: String(val).trim(),
+              notes: itemUnit.proposedAnswer?.explanation,
             });
+
+            // Always create Essay ScoringGuide
+            const sgId = createDeterministicScoringGuideId(instId, itemId);
+            const guideInstructions =
+              itemUnit.scoringGuideDraft?.instructions ||
+              (itemUnit.proposedAnswer?.value
+                ? `Pedoman Penskoran Uraian: Berikan skor berdasarkan kelengkapan jawaban siswa terhadap pokok jawaban: ${itemUnit.proposedAnswer.value}`
+                : 'Pedoman Penskoran Uraian: Berikan skor berdasarkan kebenaran konsep, kelengkapan uraian, dan keruntutan penjelasan.');
+            const maxScore = itemUnit.scoringGuideDraft?.maxScore || 10;
+
+            scoringGuides.push({
+              id: sgId,
+              title: `Pedoman Penskoran Uraian Butir #${uIdx + 1}`,
+              instrumentId: instId,
+              instrumentItemId: itemId,
+              guideType: 'ESSAY',
+              instructions: guideInstructions,
+              maxScore: maxScore,
+            });
+          } else if (itemUnit.itemType === 'MATCHING') {
+            const pairs = itemUnit.proposedAnswer?.matchingPairs || (itemUnit as any).matchingPairs || [];
+            if (pairs.length > 0) {
+              answerKeys.push({
+                id: ansKeyId,
+                instrumentId: instId,
+                instrumentItemId: itemId,
+                answerType: 'MATCHING',
+                matchingPairs: pairs,
+                notes: itemUnit.proposedAnswer?.explanation,
+              });
+            }
+          } else if (itemUnit.itemType === 'CATEGORY_RESPONSE') {
+            const categoryAnswers: { statementId: string; categoryId: string }[] =
+              (itemUnit.proposedAnswer?.categoryAnswers as unknown as { statementId: string; categoryId: string }[]) ||
+              (itemUnit.categoryStatements
+                ? (itemUnit.categoryStatements as any[])
+                    .filter((s) => s && s.correctCategoryId)
+                    .map((s) => ({ statementId: String(s.id), categoryId: String(s.correctCategoryId) }))
+                : []);
+
+            if (categoryAnswers.length > 0) {
+              answerKeys.push({
+                id: ansKeyId,
+                instrumentId: instId,
+                instrumentItemId: itemId,
+                answerType: 'CATEGORY_RESPONSE',
+                categoryAnswers: categoryAnswers,
+                notes: itemUnit.proposedAnswer?.explanation,
+              });
+            }
           }
 
-          // Scoring Guide
-          if (itemUnit.scoringGuideDraft) {
+          // Scoring Guide for non-essay objective items if draft provided
+          if (itemUnit.itemType !== 'ESSAY' && itemUnit.scoringGuideDraft) {
             const sgId = createDeterministicScoringGuideId(instId, itemId);
             scoringGuides.push({
               id: sgId,
               title: `Pedoman Penskoran Butir #${uIdx + 1}`,
               instrumentId: instId,
               instrumentItemId: itemId,
-              guideType: itemUnit.itemType === 'ESSAY' ? 'ESSAY' : 'OBJECTIVE',
+              guideType: 'OBJECTIVE',
               instructions: itemUnit.scoringGuideDraft.instructions,
               maxScore: itemUnit.scoringGuideDraft.maxScore,
             });
