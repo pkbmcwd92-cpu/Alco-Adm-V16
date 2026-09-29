@@ -1192,6 +1192,7 @@ export interface AutoAllocationParams {
   semesterPlanId: string;
   reservedNonAtpJP?: number;
   s1Capacity: {
+    semesterPlanId?: string;
     availableJP: number | null;
     effectiveWeeks: number | null;
     effectiveWeekSlots?: number | null;
@@ -1199,6 +1200,7 @@ export interface AutoAllocationParams {
     isCalendarConfirmed: boolean;
   };
   s2Capacity: {
+    semesterPlanId?: string;
     availableJP: number | null;
     effectiveWeeks: number | null;
     effectiveWeekSlots?: number | null;
@@ -1311,6 +1313,22 @@ export function buildAutomaticSemesterAllocations(
       s2ItemsCount: 0,
       message:
         'Lengkapi kalender dan JP aktual Semester 1 & 2 agar pembagian ATP tahunan dapat dihitung secara konsisten.',
+    };
+  }
+
+  // Konsistensi identitas target semester dan semesterPlanId (Fail-closed)
+  if (
+    (targetSemester === '1' && s1Capacity?.semesterPlanId && semesterPlanId !== s1Capacity.semesterPlanId) ||
+    (targetSemester === '2' && s2Capacity?.semesterPlanId && semesterPlanId !== s2Capacity.semesterPlanId) ||
+    (targetSemester === '1' && s2Capacity?.semesterPlanId && s1Capacity?.semesterPlanId !== s2Capacity.semesterPlanId && semesterPlanId === s2Capacity.semesterPlanId) ||
+    (targetSemester === '2' && s1Capacity?.semesterPlanId && s1Capacity.semesterPlanId !== s2Capacity?.semesterPlanId && semesterPlanId === s1Capacity.semesterPlanId)
+  ) {
+    return {
+      status: 'NOT_READY',
+      allocations: [],
+      s1ItemsCount: 0,
+      s2ItemsCount: 0,
+      message: `Inkonsistensi: targetSemester '${targetSemester}' tidak sesuai dengan semesterPlanId '${semesterPlanId}'.`,
     };
   }
 

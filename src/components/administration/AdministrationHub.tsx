@@ -93,6 +93,7 @@ interface AdministrationHubProps {
   protaSemesterAllocations?: ProtaSemesterAllocationBundle[];
   initialTab?: AdministrationTab;
   onSaveCalendar: (calendar: AcademicCalendar, days: CalendarDay[], actualScheduledWeeklyJP?: number | null) => void;
+  onSaveSemesterJPSetting?: (actualWeeklyJP: number | null) => void;
   onSaveTimeAllocations: (allocations: TimeAllocation[]) => void;
   onSaveStudents: (students: Student[]) => void;
   onSaveAttendance: (session: AttendanceSession, records: AttendanceRecord[]) => void;
@@ -143,6 +144,7 @@ export const AdministrationHub: React.FC<AdministrationHubProps> = ({
   protaSemesterAllocations = [],
   initialTab = 'time_planning',
   onSaveCalendar,
+  onSaveSemesterJPSetting,
   onSaveTimeAllocations,
   onSaveStudents,
   onSaveAttendance,
@@ -391,6 +393,7 @@ export const AdministrationHub: React.FC<AdministrationHubProps> = ({
             timeAllocations={timeAllocations}
             semesterJPSetting={semesterJPSetting}
             onSaveCalendar={onSaveCalendar}
+            onSaveSemesterJPSetting={onSaveSemesterJPSetting}
             onSaveTimeAllocations={onSaveTimeAllocations}
           />
         )}

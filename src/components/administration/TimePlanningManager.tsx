@@ -98,6 +98,7 @@ export interface TimePlanningManagerProps {
   timeAllocations: TimeAllocation[];
   semesterJPSetting?: SemesterJPSetting;
   onSaveCalendar: (calendar: AcademicCalendar, days: CalendarDay[], actualScheduledWeeklyJP?: number | null) => void;
+  onSaveSemesterJPSetting?: (actualWeeklyJP: number | null) => void;
   onSaveTimeAllocations: (allocations: TimeAllocation[]) => void;
 }
 
@@ -112,6 +113,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
   timeAllocations = [],
   semesterJPSetting,
   onSaveCalendar,
+  onSaveSemesterJPSetting,
   onSaveTimeAllocations,
 }) => {
   const isK13Curriculum =
@@ -126,6 +128,23 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
       subject: academicSetting.subject,
     });
   }, [academicSetting]);
+
+  // Derived active semester authority strictly from academicSetting.id and academicSetting.semester matched with V5
+  const activeSemester: '1' | '2' = useMemo(() => {
+    try {
+      const v5State = loadStorageV5();
+      const matchedSp = v5State.semesterPlans.find((sp) => sp.id === academicSetting.id);
+      if (matchedSp) {
+        return matchedSp.semester === 2 ? '2' : '1';
+      }
+    } catch {
+      // fallback
+    }
+    const res = resolveSemester(academicSetting.semester);
+    return res === '2' ? '2' : '1';
+  }, [academicSetting.id, academicSetting.semester]);
+
+  const semester = activeSemester;
 
   // Workflow State
   const [workflowStatus, setWorkflowStatus] = useState<CalendarWorkflowStatus>(
@@ -147,9 +166,6 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
   );
   const [academicYear, setAcademicYear] = useState<string>(
     calendar?.academicYear || academicSetting.academicYear || ''
-  );
-  const [semester, setSemester] = useState<'1' | '2' | null>(
-    resolveSemester(calendar?.semester, academicSetting.semester)
   );
 
   // Calendar dates & structure
@@ -201,7 +217,63 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
   const [resolutionMessage, setResolutionMessage] = useState<string | null>(null);
 
-  // Sync state when props change across semesters
+  // Reset all semester-scoped state when academicSetting.id changes
+  useEffect(() => {
+    if (calendar) {
+      setWorkflowStatus(calendar.workflowStatus || (calendar.startDate && calendar.endDate ? 'AUTO_RESOLVED' : 'UNRESOLVED'));
+      setResolutionStatus(calendar.resolutionStatus || (calendar.startDate && calendar.endDate ? 'RESOLVED' : 'UNRESOLVED'));
+      setStartDate(calendar.startDate || '');
+      setEndDate(calendar.endDate || '');
+      setSchoolDaysPerWeek(
+        calendar.schoolDaysPerWeek === 5 || calendar.schoolDaysPerWeek === 6
+          ? calendar.schoolDaysPerWeek
+          : null
+      );
+      setSourceType(calendar.sourceType || 'REGIONAL_EDUCATION_CALENDAR');
+      setSourceName(calendar.sourceName || '');
+      setSourceAuthority(calendar.sourceAuthority || '');
+      setSourceDocumentNumber(calendar.sourceDocumentNumber || '');
+      setSourceUrl(calendar.sourceUrl || '');
+      setIsOverridden(calendar.isOverridden || false);
+      setOverrideReason(calendar.overrideReason || '');
+    } else {
+      setStartDate('');
+      setEndDate('');
+      setSchoolDaysPerWeek(null);
+      setWorkflowStatus('UNRESOLVED');
+      setResolutionStatus('UNRESOLVED');
+      setSourceType('REGIONAL_EDUCATION_CALENDAR');
+      setSourceName('');
+      setSourceAuthority('');
+      setSourceDocumentNumber('');
+      setSourceUrl('');
+      setIsOverridden(false);
+      setOverrideReason('');
+    }
+
+    setDays(calendarDays || []);
+    setAllocations(timeAllocations || []);
+
+    const resolvedJP =
+      semesterJPSetting?.actualScheduledWeeklyJP !== undefined && semesterJPSetting?.actualScheduledWeeklyJP !== null
+        ? semesterJPSetting.actualScheduledWeeklyJP
+        : calendar?.jpPerWeek !== undefined && calendar?.jpPerWeek !== null
+        ? calendar.jpPerWeek
+        : null;
+    setJpPerWeek(resolvedJP);
+
+    setOnlineDiscovery(null);
+    setResolutionMessage(null);
+    setOnlineSearchError(null);
+    setOnlineDiagnostic(null);
+    setAiSearchStatus('IDLE');
+    setIsLocalFallbackUsed(false);
+    setSaveNotification(null);
+    setNewDayDate('');
+    setNewDayNotes('');
+  }, [academicSetting.id]);
+
+  // Sync state when props change within active semester
   useEffect(() => {
     setDays(calendarDays || []);
   }, [calendarDays]);
@@ -298,6 +370,33 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
     return totalAvailableJP - totalPlannedJP;
   }, [totalAvailableJP, totalPlannedJP]);
 
+  // Canonical Semester Capacity from V5 Storage Authority
+  const canonicalCapacity = useMemo(() => {
+    try {
+      const v5State = loadStorageV5();
+      if (!academicSetting.id) return null;
+      return resolveSemesterCapacityV5(academicSetting.id, v5State);
+    } catch {
+      return null;
+    }
+  }, [academicSetting.id, calendar, semesterJPSetting]);
+
+  const isCapacityCanonical = Boolean(
+    canonicalCapacity?.isReady &&
+    workflowStatus === 'CONFIRMED' &&
+    jpPerWeek === semesterJPSetting?.actualScheduledWeeklyJP &&
+    calendar?.workflowStatus === 'CONFIRMED'
+  );
+
+  const handleSaveJP = () => {
+    if (onSaveSemesterJPSetting) {
+      onSaveSemesterJPSetting(jpPerWeek);
+    }
+    const semLabel = activeSemester === '1' ? '1' : '2';
+    setSaveNotification(`JP aktual tersimpan untuk Semester ${semLabel}.`);
+    setTimeout(() => setSaveNotification(null), 3500);
+  };
+
   // Online Discovery & Resolution State
   type CalendarAISearchStatus =
     | 'IDLE'
@@ -309,7 +408,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
   const [onlineDiscovery, setOnlineDiscovery] = useState<CalendarSourceCandidate | null>(null);
 
   // Active Semester & Projection from Annual Source Candidate
-  const activeSem = semester === '2' || semester === 2 ? 2 : 1;
+  const activeSem = semester === '2' ? 2 : 1;
 
   const activeSemProjection = useMemo(() => {
     if (!onlineDiscovery) return { startDate: undefined, endDate: undefined, hasDates: false };
@@ -419,7 +518,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
         setOnlineSearchError(null);
 
         if (candidateLevel === 'NATIONAL') {
-          const activeSem = semester === '2' || semester === 2 ? 2 : 1;
+          const activeSem = semester === '2' ? 2 : 1;
           const baseline = resolvePlanningBaseline({
             academicYear: academicSetting.academicYear || academicYear,
             semester: semester || '1',
@@ -534,7 +633,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
       } else {
         // 3. NATIONAL BASE DETERMINISTIC FALLBACK (when both online search and local regional cache fail)
         const natCandidate = buildNationalBaseCandidate(academicYear);
-        const activeSem = semester === '2' || semester === 2 ? 2 : 1;
+        const activeSem = semester === '2' ? 2 : 1;
         const baseline = resolvePlanningBaseline({
           academicYear: academicSetting.academicYear || academicYear,
           semester: semester || '1',
@@ -590,7 +689,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
 
   const handleApplyOnlineCandidate = (candidate: CalendarSourceCandidate) => {
     // Project active semester boundaries from annual candidate
-    const activeSem = semester === '2' || semester === 2 ? 2 : 1;
+    const activeSem = semester === '2' ? 2 : 1;
 
     let targetStart = activeSem === 1
       ? (candidate.semester1StartDate || candidate.semesterStartDate)
@@ -779,17 +878,20 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
       isOverridden: true,
       category: newDayStatus === 'holiday' ? 'OTHER' : 'SCHOOL_EVENT',
     };
-    const updatedDays = [...days, newDay].sort((a, b) => a.date.localeCompare(b.date));
+    const cleanedDays = days.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
+    const updatedDays = [...cleanedDays, newDay].sort((a, b) => a.date.localeCompare(b.date));
     setDays(updatedDays);
     setNewDayDate('');
     setNewDayNotes('');
     setIsOverridden(true);
+    setWorkflowStatus('MANUAL_OVERRIDE');
   };
 
   const handleRemoveDay = (id: string) => {
-    const updatedDays = days.filter((d) => d.id !== id);
-    setDays(updatedDays);
+    const cleanedDays = days.filter((d) => d.id !== id && d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
+    setDays(cleanedDays);
     setIsOverridden(true);
+    setWorkflowStatus('MANUAL_OVERRIDE');
   };
 
   const handleResetToOfficialJP = () => {
@@ -945,14 +1047,28 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
 
   // Readiness for automatic ATP allocation across Semester 1 & 2
   const autoAllocationReadiness = useMemo(() => {
-    if (isK13Curriculum || !atp?.items || atp.items.length === 0) {
+    const hasAtpItems = Boolean(atp?.items && atp.items.length > 0);
+    const atpCount = atp?.items?.length || 0;
+
+    if (isK13Curriculum || !hasAtpItems) {
       return {
         isReady: false,
         s1Capacity: null,
         s2Capacity: null,
         sem1PlanId: null,
         sem2PlanId: null,
-        disabledReason: 'Bukan Kurikulum Merdeka atau belum ada item ATP tahunan.',
+        s1CalReady: false,
+        s1JPReady: false,
+        s2CalReady: false,
+        s2JPReady: false,
+        hasAtpItems,
+        atpCount,
+        guidance: isK13Curriculum
+          ? 'Kurikulum 2013 menggunakan pemetaan KD per pekan.'
+          : 'Susun Alur Tujuan Pembelajaran (ATP) tahunan terlebih dahulu di Step 05.',
+        disabledReason: isK13Curriculum
+          ? 'Bukan Kurikulum Merdeka.'
+          : 'Belum ada item ATP tahunan yang disusun.',
       };
     }
 
@@ -977,52 +1093,64 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
           s2Capacity: null,
           sem1PlanId: null,
           sem2PlanId: null,
+          s1CalReady: false,
+          s1JPReady: false,
+          s2CalReady: false,
+          s2JPReady: false,
+          hasAtpItems,
+          atpCount,
+          guidance: 'Lengkapi rencana Semester 1 dan Semester 2 pada struktur Tahun Ajaran aktif.',
           disabledReason: 'Rencana Semester 1 dan 2 belum lengkap pada Tahun Ajaran aktif.',
         };
       }
 
-      const activePlanId = academicSetting.id;
-      const isSem1Active = activePlanId === sem1Plan.id || semester === '1';
+      // STRICTLY CANONICAL V5: No local unsaved overrides injected!
+      const s1Cap = resolveSemesterCapacityV5(sem1Plan.id, v5State);
+      const s2Cap = resolveSemesterCapacityV5(sem2Plan.id, v5State);
 
-      const s1Override = isSem1Active
-        ? {
-            calendar: calendar ? { ...calendar, workflowStatus } : undefined,
-            calendarDays: days,
-            semesterJPSetting:
-              semesterJPSetting ||
-              (jpPerWeek
-                ? {
-                    semesterPlanId: sem1Plan.id,
-                    actualScheduledWeeklyJP: jpPerWeek,
-                    source: 'TEACHER_CONFIRMED' as const,
-                  }
-                : undefined),
-          }
-        : undefined;
+      const s1CalReady = Boolean(
+        s1Cap?.isCalendarConfirmed &&
+        s1Cap.effectiveLearningDays &&
+        s1Cap.effectiveLearningDays > 0 &&
+        s1Cap.effectiveWeekSlots &&
+        s1Cap.effectiveWeekSlots > 0
+      );
+      const s1JPReady = Boolean(
+        s1Cap?.actualScheduledWeeklyJP && s1Cap.actualScheduledWeeklyJP > 0
+      );
+      const s2CalReady = Boolean(
+        s2Cap?.isCalendarConfirmed &&
+        s2Cap.effectiveLearningDays &&
+        s2Cap.effectiveLearningDays > 0 &&
+        s2Cap.effectiveWeekSlots &&
+        s2Cap.effectiveWeekSlots > 0
+      );
+      const s2JPReady = Boolean(
+        s2Cap?.actualScheduledWeeklyJP && s2Cap.actualScheduledWeeklyJP > 0
+      );
 
-      const s2Override = !isSem1Active
-        ? {
-            calendar: calendar ? { ...calendar, workflowStatus } : undefined,
-            calendarDays: days,
-            semesterJPSetting:
-              semesterJPSetting ||
-              (jpPerWeek
-                ? {
-                    semesterPlanId: sem2Plan.id,
-                    actualScheduledWeeklyJP: jpPerWeek,
-                    source: 'TEACHER_CONFIRMED' as const,
-                  }
-                : undefined),
-          }
-        : undefined;
+      let guidance = '';
+      if (!s1CalReady) {
+        guidance = 'Lengkapi dan tetapkan Kalender Semester 1 agar alokasi tahunan dapat dipartisi secara proporsional.';
+      } else if (!s1JPReady) {
+        guidance = 'Simpan JP Aktual Mapel untuk Semester 1.';
+      } else if (!s2CalReady) {
+        guidance = 'Lengkapi Kalender Semester 2 agar alokasi tahunan dapat dipartisi secara proporsional.';
+      } else if (!s2JPReady) {
+        guidance = 'Simpan JP Aktual Mapel untuk Semester 2.';
+      } else {
+        guidance = 'Semua prasyarat terpenuhi. Alokasi ATP tahunan siap dipartisi otomatis ke semester ini.';
+      }
 
-      const s1Cap = resolveSemesterCapacityV5(sem1Plan.id, v5State, s1Override);
-      const s2Cap = resolveSemesterCapacityV5(sem2Plan.id, v5State, s2Override);
-
-      const isReady = s1Cap.isReady && s2Cap.isReady;
-      const disabledReason = !isReady
-        ? 'Lengkapi kalender dan JP aktual Semester 1 & 2 agar pembagian ATP tahunan dapat dihitung secara konsisten.'
-        : undefined;
+      const isReady = Boolean(
+        hasAtpItems &&
+        s1CalReady &&
+        s1JPReady &&
+        s2CalReady &&
+        s2JPReady &&
+        s1Cap.isReady &&
+        s2Cap.isReady
+      );
 
       return {
         isReady,
@@ -1030,7 +1158,14 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
         s2Capacity: s2Cap,
         sem1PlanId: sem1Plan.id,
         sem2PlanId: sem2Plan.id,
-        disabledReason,
+        s1CalReady,
+        s1JPReady,
+        s2CalReady,
+        s2JPReady,
+        hasAtpItems,
+        atpCount,
+        guidance,
+        disabledReason: !isReady ? guidance : undefined,
       };
     } catch {
       return {
@@ -1039,6 +1174,13 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
         s2Capacity: null,
         sem1PlanId: null,
         sem2PlanId: null,
+        s1CalReady: false,
+        s1JPReady: false,
+        s2CalReady: false,
+        s2JPReady: false,
+        hasAtpItems,
+        atpCount,
+        guidance: 'Lengkapi kalender dan JP aktual Semester 1 & 2 agar pembagian ATP tahunan dapat dihitung secara konsisten.',
         disabledReason:
           'Lengkapi kalender dan JP aktual Semester 1 & 2 agar pembagian ATP tahunan dapat dihitung secara konsisten.',
       };
@@ -1047,20 +1189,55 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
     isK13Curriculum,
     atp,
     academicSetting.id,
-    semester,
     calendar,
-    workflowStatus,
-    days,
     semesterJPSetting,
-    jpPerWeek,
   ]);
 
   const handleAutoAllocate = () => {
     if (
       !autoAllocationReadiness.isReady ||
       !autoAllocationReadiness.s1Capacity ||
-      !autoAllocationReadiness.s2Capacity
+      !autoAllocationReadiness.s2Capacity ||
+      !autoAllocationReadiness.sem1PlanId ||
+      !autoAllocationReadiness.sem2PlanId
     ) {
+      return;
+    }
+
+    // Determine target semester and exact semesterPlanId strictly from academicSetting.id and SemesterPlan
+    let targetSem: '1' | '2' | null = null;
+    let planId: string | null = null;
+
+    if (academicSetting.id === autoAllocationReadiness.sem1PlanId) {
+      targetSem = '1';
+      planId = autoAllocationReadiness.sem1PlanId;
+    } else if (academicSetting.id === autoAllocationReadiness.sem2PlanId) {
+      targetSem = '2';
+      planId = autoAllocationReadiness.sem2PlanId;
+    } else {
+      if (activeSemester === '1') {
+        targetSem = '1';
+        planId = autoAllocationReadiness.sem1PlanId;
+      } else if (activeSemester === '2') {
+        targetSem = '2';
+        planId = autoAllocationReadiness.sem2PlanId;
+      }
+    }
+
+    // Fail closed guard: targetSem and planId MUST match consistently
+    if (!targetSem || !planId) {
+      setSaveNotification('Gagal menyusun alokasi: identitas SemesterPlan tidak konsisten.');
+      setTimeout(() => setSaveNotification(null), 3500);
+      return;
+    }
+    if (targetSem === '1' && planId !== autoAllocationReadiness.sem1PlanId) {
+      setSaveNotification('Gagal menyusun alokasi: target semester 1 tidak cocok dengan semesterPlanId.');
+      setTimeout(() => setSaveNotification(null), 3500);
+      return;
+    }
+    if (targetSem === '2' && planId !== autoAllocationReadiness.sem2PlanId) {
+      setSaveNotification('Gagal menyusun alokasi: target semester 2 tidak cocok dengan semesterPlanId.');
+      setTimeout(() => setSaveNotification(null), 3500);
       return;
     }
 
@@ -1089,13 +1266,6 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
         return;
       }
     }
-
-    const targetSem = semester === '2' ? '2' : '1';
-    const planId =
-      academicSetting.id ||
-      (targetSem === '1'
-        ? autoAllocationReadiness.sem1PlanId!
-        : autoAllocationReadiness.sem2PlanId!);
 
     const autoResult = buildAutomaticSemesterAllocations({
       annualATPItems: atp?.items || [],
@@ -1129,9 +1299,9 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
 
       setAllocations(updatedAllocations);
       setSaveNotification(
-        'Alokasi waktu semester berhasil disusun otomatis! Silakan tinjau dan klik "Simpan Pemetaan Waktu".'
+        `Alokasi ATP Semester ${targetSem} berhasil disusun otomatis (${autoResult.allocations.length} materi, status: ${combinedValidation.statusLabel}). Periksa dan klik "Simpan Pemetaan Waktu" untuk menyimpan.`
       );
-      setTimeout(() => setSaveNotification(null), 4000);
+      setTimeout(() => setSaveNotification(null), 4500);
     } else {
       setSaveNotification(
         `Gagal menyusun alokasi otomatis: ${autoResult.message || 'Kapasitas tidak mencukupi'}`
@@ -1697,13 +1867,30 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
           </div>
 
           <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4">
-            <span className="text-xs font-medium text-slate-500 block">Total JP Efektif Tersedia</span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500">Total JP Efektif Tersedia</span>
+              {canonicalCapacity?.isReady ? (
+                <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-semibold text-[10px]">
+                  Resmi Canonical
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded font-semibold text-[10px]">
+                  Proyeksi Draf
+                </span>
+              )}
+            </div>
             <span className="text-2xl font-bold text-indigo-600 mt-1 block">
-              {totalAvailableJP !== null ? `${totalAvailableJP} JP` : '-'}
+              {canonicalCapacity?.isReady
+                ? `${canonicalCapacity.availableJP} JP`
+                : totalAvailableJP !== null
+                ? `${totalAvailableJP} JP (Draf)`
+                : '-'}
             </span>
-            <span className="text-[11px] text-indigo-600/80 font-medium">
-              {effectiveWeeks !== null && jpPerWeek !== null
-                ? `${effectiveWeeks} pekan × ${jpPerWeek} JP/pekan`
+            <span className="text-[11px] text-slate-500 font-medium block mt-0.5">
+              {canonicalCapacity?.isReady
+                ? `${canonicalCapacity.effectiveWeeks} pekan × ${canonicalCapacity.actualScheduledWeeklyJP} JP/pekan (Tersimpan)`
+                : totalAvailableJP !== null
+                ? `${effectiveWeeks} pekan × ${jpPerWeek} JP/pekan (Belum tersimpan)`
                 : 'Menunggu pengaturan JP/minggu aktual.'}
             </span>
           </div>
@@ -1888,6 +2075,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                     const cleanedDays = days.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
                     setDays(cleanedDays);
                     setIsOverridden(true);
+                    setWorkflowStatus('MANUAL_OVERRIDE');
                   }}
                   className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white font-medium"
                 >
@@ -1909,6 +2097,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                       const cleanedDays = days.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
                       setDays(cleanedDays);
                       setIsOverridden(true);
+                      setWorkflowStatus('MANUAL_OVERRIDE');
                     }}
                     className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   />
@@ -1925,6 +2114,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                       const cleanedDays = days.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
                       setDays(cleanedDays);
                       setIsOverridden(true);
+                      setWorkflowStatus('MANUAL_OVERRIDE');
                     }}
                     className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   />
@@ -1946,27 +2136,43 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                 );
               })()}
 
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-medium text-slate-700">JP Intrakurikuler / Pekan</label>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-slate-700">JP Aktual Mapel / Pekan</label>
                   {officialRule.isOfficial && officialRule.weeklyJP !== null && (
-                    <span className="text-[10px] text-slate-500 font-normal">
-                      Resmi Kurikulum: {officialRule.weeklyJP} JP
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      Acuan kurikulum: {officialRule.weeklyJP} JP/pekan
                     </span>
                   )}
                 </div>
-                <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={jpPerWeek ?? ''}
-                  placeholder="Masukkan JP"
-                  onChange={(e) => {
-                    const val = e.target.value ? Number(e.target.value) : null;
-                    setJpPerWeek(val);
-                  }}
-                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none font-semibold text-indigo-900"
-                />
+                <p className="text-[11px] text-slate-500">
+                  Isi sesuai jadwal nyata mapel pada semester ini.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="input-actual-weekly-jp"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={jpPerWeek ?? ''}
+                    placeholder="Masukkan JP"
+                    onChange={(e) => {
+                      const val = e.target.value ? Number(e.target.value) : null;
+                      setJpPerWeek(val);
+                    }}
+                    className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none font-semibold text-indigo-900"
+                  />
+                  <button
+                    id="btn-save-semester-jp"
+                    type="button"
+                    onClick={handleSaveJP}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                    title="Simpan JP Aktual"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Simpan JP Aktual</span>
+                  </button>
+                </div>
               </div>
 
               {/* Monthly Breakdown Preview */}
@@ -2182,6 +2388,100 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Kurikulum Merdeka: Auto-Allocation Readiness Checklist Card */}
+        {!isK13Curriculum && (
+          <div className="mb-5 bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-600" />
+                <span className="font-bold text-slate-800">
+                  Status Kesiapan Partisi ATP Tahunan (S1 &amp; S2):
+                </span>
+              </div>
+              <span
+                className={`px-2.5 py-0.5 rounded text-[11px] font-bold border ${
+                  autoAllocationReadiness.isReady
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : 'bg-amber-100 text-amber-800 border-amber-300'
+                }`}
+              >
+                {autoAllocationReadiness.isReady ? 'Siap Dipartisi' : 'Prasyarat Belum Lengkap'}
+              </span>
+            </div>
+
+            {/* Status Checklist: S1 Calendar, S1 JP, S2 Calendar, S2 JP, ATP items */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
+              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white border border-slate-200 shadow-2xs">
+                {autoAllocationReadiness.s1CalReady ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                )}
+                <div className="truncate">
+                  <span className="text-slate-500 block text-[10px]">Kalender S1</span>
+                  <span className="font-semibold text-slate-800">{autoAllocationReadiness.s1CalReady ? 'Siap' : 'Belum'}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white border border-slate-200 shadow-2xs">
+                {autoAllocationReadiness.s1JPReady ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                )}
+                <div className="truncate">
+                  <span className="text-slate-500 block text-[10px]">JP S1</span>
+                  <span className="font-semibold text-slate-800">{autoAllocationReadiness.s1JPReady ? 'Siap' : 'Belum'}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white border border-slate-200 shadow-2xs">
+                {autoAllocationReadiness.s2CalReady ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                )}
+                <div className="truncate">
+                  <span className="text-slate-500 block text-[10px]">Kalender S2</span>
+                  <span className="font-semibold text-slate-800">{autoAllocationReadiness.s2CalReady ? 'Siap' : 'Belum'}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white border border-slate-200 shadow-2xs">
+                {autoAllocationReadiness.s2JPReady ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                )}
+                <div className="truncate">
+                  <span className="text-slate-500 block text-[10px]">JP S2</span>
+                  <span className="font-semibold text-slate-800">{autoAllocationReadiness.s2JPReady ? 'Siap' : 'Belum'}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white border border-slate-200 shadow-2xs">
+                {autoAllocationReadiness.hasAtpItems ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                )}
+                <div className="truncate">
+                  <span className="text-slate-500 block text-[10px]">Total TP/ATP</span>
+                  <span className="font-semibold text-slate-800">{autoAllocationReadiness.hasAtpItems ? `${autoAllocationReadiness.atpCount} TP` : 'Kosong'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Direct guidance */}
+            {autoAllocationReadiness.guidance && (
+              <p className="text-[11px] text-slate-600 flex items-center gap-1.5 pt-1">
+                <Info className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                <span><strong>Petunjuk:</strong> {autoAllocationReadiness.guidance}</span>
+              </p>
+            )}
+          </div>
+        )}
 
         {isK13Curriculum ? (
           /* K13 Table Mapping */

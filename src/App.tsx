@@ -750,7 +750,25 @@ export function App() {
         days: canonicalDays,
       });
 
-      // Save SemesterJPSetting SSOT
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan Kalender Pendidikan.',
+      });
+    }
+  };
+
+  const handleSaveSemesterJPSetting = (actualWeeklyJP: number | null) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan JP aktual.',
+      });
+      return;
+    }
+
+    try {
       const isJPProvided =
         typeof actualWeeklyJP === 'number' && Number.isFinite(actualWeeklyJP) && actualWeeklyJP > 0;
 
@@ -761,12 +779,11 @@ export function App() {
       };
 
       saveSemesterJPSettingV5(activeSemesterPlan.id, semesterJPSetting);
-
       refreshV5();
     } catch (err: any) {
       setAppNotice({
         type: 'error',
-        message: err instanceof Error ? err.message : 'Gagal menyimpan Kalender Pendidikan.',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan pengaturan JP semester.',
       });
     }
   };
@@ -1119,6 +1136,7 @@ export function App() {
               assessmentPlans={[]}
               assessmentPackages={[]}
               onSaveCalendar={handleSaveCalendar}
+              onSaveSemesterJPSetting={handleSaveSemesterJPSetting}
               onSaveTimeAllocations={handleSaveTimeAllocations}
               onSaveStudents={handleSaveStudents}
               onSaveAttendance={handleSaveAttendance}
