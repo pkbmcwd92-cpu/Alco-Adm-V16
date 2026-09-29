@@ -1586,10 +1586,7 @@ export async function renderAssessmentDocx(
           );
         }
       });
-    } else if (
-      inst.type === 'SELF_ASSESSMENT' ||
-      inst.type === 'PEER_ASSESSMENT'
-    ) {
+    } else if (inst.type === 'SELF_ASSESSMENT' || inst.type === 'PEER_ASSESSMENT') {
       if (inst.responseScheme) {
         docChildren.push(
           createAssessmentNarrativeParagraph(`Skema Respon: ${inst.responseScheme}`)
@@ -2002,10 +1999,7 @@ export function renderAssessmentPdf(model: NormalizedAssessmentDocument): Blob {
           });
         }
       });
-    } else if (
-      inst.type === 'SELF_ASSESSMENT' ||
-      inst.type === 'PEER_ASSESSMENT'
-    ) {
+    } else if (inst.type === 'SELF_ASSESSMENT' || inst.type === 'PEER_ASSESSMENT') {
       if (inst.responseScheme) {
         sections.push({
           type: 'paragraph',
