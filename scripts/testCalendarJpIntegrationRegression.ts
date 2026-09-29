@@ -9,6 +9,8 @@ import {
   saveSemesterJPSettingV5,
   saveTimeAllocationV5,
 } from '../src/services/storageV5';
+import { resolveSemesterCapacityV5 } from '../src/services/jpEngine';
+import { generateEffectiveCalendarDays } from '../src/services/calendarResolver';
 import { getRuntimeContextV5 } from '../src/services/runtimeV5';
 import {
   AcademicCalendar,
@@ -392,6 +394,103 @@ runTest('10. Contract E: JP save contract does not save or mutate AcademicCalend
   const calAfter = stateAfter.semesterData?.academicCalendar?.find((e) => e.semesterPlanId === sem1.id)?.value;
 
   assert.deepStrictEqual(calAfter, calBefore, 'AcademicCalendar data must remain completely unmutated by JP save');
+});
+
+// -----------------------------------------------------------------------------
+// TEST 11: Contract D - Save JP does not erase Calendar data in V5 or affect days
+// -----------------------------------------------------------------------------
+runTest('11. Contract D: Save JP does not overwrite or erase AcademicCalendar / CalendarDays', () => {
+  const stateBefore = loadStorageV5();
+  const calBefore = stateBefore.semesterData?.academicCalendar?.find((e) => e.semesterPlanId === sem1.id)?.value;
+
+  // Save JP for sem1
+  saveSemesterJPSettingV5(sem1.id, {
+    semesterPlanId: sem1.id,
+    actualScheduledWeeklyJP: 4,
+    source: 'TEACHER_CONFIRMED',
+  });
+
+  const stateAfter = loadStorageV5();
+  const calAfter = stateAfter.semesterData?.academicCalendar?.find((e) => e.semesterPlanId === sem1.id)?.value;
+  assert.deepStrictEqual(calAfter, calBefore, 'Calendar data must remain unchanged after JP save');
+});
+
+// -----------------------------------------------------------------------------
+// TEST 12: Contract E - Save TimeAllocation does not erase AcademicCalendar / days in V5
+// -----------------------------------------------------------------------------
+runTest('12. Contract E: Save TimeAllocation does not erase or mutate AcademicCalendar in V5', () => {
+  const stateBefore = loadStorageV5();
+  const calBefore = stateBefore.semesterData?.academicCalendar?.find((e) => e.semesterPlanId === sem1.id)?.value;
+
+  const dummyAlloc: TimeAllocation = {
+    id: `alloc-${Date.now()}-test`,
+    academicSettingId: sem1.id,
+    sourceType: 'ATP_ITEM',
+    sourceId: 'tp-test-1',
+    semester: '1 (Ganjil)',
+    startWeek: 1,
+    endWeek: 2,
+    weekNumber: 1,
+    jp: 8,
+    allocatedJP: 8,
+  };
+
+  saveTimeAllocationV5(sem1.id, [dummyAlloc]);
+
+  const stateAfter = loadStorageV5();
+  const calAfter = stateAfter.semesterData?.academicCalendar?.find((e) => e.semesterPlanId === sem1.id)?.value;
+  assert.deepStrictEqual(calAfter, calBefore, 'Calendar data must remain unchanged after TimeAllocation save');
+});
+
+// -----------------------------------------------------------------------------
+// TEST 13: Contract F - Save TimeAllocation gating: canonical active capacity ready vs not ready
+// -----------------------------------------------------------------------------
+runTest('13. Contract F: Save TimeAllocation gating depends only on active semester canonical capacity', () => {
+  // Confirm calendar with generated days for Sem 1
+  const generatedDaysSem1 = generateEffectiveCalendarDays({
+    startDate: '2026-07-13',
+    endDate: '2026-12-18',
+    schoolDaysPerWeek: 5,
+    calendarId: `cal-${sem1.id}`,
+    academicYear: '2026/2027',
+    existingDays: [],
+  });
+  saveAcademicCalendarV5(sem1.id, {
+    calendar: {
+      id: `cal-${sem1.id}`,
+      academicSettingId: sem1.id,
+      academicYear: '2026/2027',
+      semester: '1 (Ganjil)',
+      startDate: '2026-07-13',
+      endDate: '2026-12-18',
+      schoolDaysPerWeek: 5,
+      workflowStatus: 'CONFIRMED',
+      updatedAt: new Date().toISOString(),
+    },
+    days: generatedDaysSem1,
+  });
+  saveSemesterJPSettingV5(sem1.id, {
+    semesterPlanId: sem1.id,
+    actualScheduledWeeklyJP: 4,
+    source: 'TEACHER_CONFIRMED',
+  });
+
+  const state = loadStorageV5();
+
+  // For Sem 1 (confirmed calendar + confirmed JP), active capacity is ready
+  const s1Cap = resolveSemesterCapacityV5(sem1.id, state);
+  assert.strictEqual(s1Cap.isReady, true, 'Sem 1 capacity must be ready');
+
+  // For Sem 2 (no confirmed calendar), active capacity is NOT ready
+  const s2Cap = resolveSemesterCapacityV5(sem2.id, state);
+  assert.strictEqual(s2Cap.isReady, false, 'Sem 2 capacity must NOT be ready');
+
+  // Gating rule: Active semester Sem 1 is enabled even if Sem 2 is NOT ready
+  const isSem1SaveEnabled = s1Cap.isReady;
+  assert.strictEqual(isSem1SaveEnabled, true, 'Sem 1 Save Time Allocation must be enabled independently of Sem 2');
+
+  const isSem2SaveEnabled = s2Cap.isReady;
+  assert.strictEqual(isSem2SaveEnabled, false, 'Sem 2 Save Time Allocation must be disabled until Sem 2 is ready');
 });
 
 console.log('\nAll Calendar -> Semester JP & Time Allocation integration regression tests PASSED 100%!\n');

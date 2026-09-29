@@ -1298,4 +1298,105 @@ runTest('DW. Source Contract: Readiness UX visible labels, capacity indicators, 
   );
 });
 
+// -----------------------------------------------------------------------------
+// TEST 47: Source Contract A, B & C - Generated draft preservation and canonical sync
+// -----------------------------------------------------------------------------
+runTest('DX. Source Contract: Generated draft preservation across storage refresh and clean canonical sync', () => {
+  const componentSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/components/administration/TimePlanningManager.tsx'),
+    'utf-8'
+  );
+
+  // Assert raw unconditional setDays(calendarDays || []) is NOT used in a bare useEffect([calendarDays])
+  assert.ok(
+    !componentSource.includes('useEffect(() => {\n    setDays(calendarDays || []);\n  }, [calendarDays]);'),
+    'Must not have unconditional setDays(calendarDays || []) sync on calendarDays reference change'
+  );
+
+  // Assert calendarDraftDirty guard exists
+  assert.ok(
+    componentSource.includes('calendarDraftDirty'),
+    'Must declare and use calendarDraftDirty state'
+  );
+
+  assert.ok(
+    componentSource.includes('if (calendarDraftDirty) {') || componentSource.includes('if (calendarDraftDirty) return;'),
+    'Must have draft-preservation guard preventing draft overwrite when dirty'
+  );
+
+  // Assert semester switch resets draft dirty state
+  assert.ok(
+    componentSource.includes('setCalendarDraftDirty(false)'),
+    'Must reset calendar draft dirty state upon semester plan change and canonical save'
+  );
+});
+
+// -----------------------------------------------------------------------------
+// TEST 48: Source Contract F - Save Time Allocation Gating for Kurikulum Merdeka
+// -----------------------------------------------------------------------------
+runTest('DY. Source Contract: Save Time Allocation gating requires active semester canonical capacity', () => {
+  const componentSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/components/administration/TimePlanningManager.tsx'),
+    'utf-8'
+  );
+
+  // Assert isSaveTimeAllocationEnabled is gated on canonicalCapacity?.isReady
+  assert.ok(
+    componentSource.includes('isSaveTimeAllocationEnabled'),
+    'Must declare isSaveTimeAllocationEnabled'
+  );
+  assert.ok(
+    componentSource.includes('canonicalCapacity?.isReady'),
+    'isSaveTimeAllocationEnabled must be gated on canonicalCapacity?.isReady'
+  );
+
+  // Assert visible warning message when save is disabled
+  assert.ok(
+    componentSource.includes('Kalender semester dan JP Aktual harus disimpan terlebih dahulu sebelum pemetaan waktu disimpan.'),
+    'Must contain visible notice explaining why Save Time Allocation is disabled'
+  );
+});
+
+// -----------------------------------------------------------------------------
+// TEST 49: Source Contract G - 3-State Calendar Status UI Labels
+// -----------------------------------------------------------------------------
+runTest('DZ. Source Contract: 3-state calendar status UI distinguishes Belum dibuat, Draf — belum ditetapkan, and Tersimpan', () => {
+  const componentSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/components/administration/TimePlanningManager.tsx'),
+    'utf-8'
+  );
+
+  assert.ok(
+    componentSource.includes('Belum dibuat'),
+    'Must contain "Belum dibuat" state label'
+  );
+  assert.ok(
+    componentSource.includes('Draf — belum ditetapkan'),
+    'Must contain "Draf — belum ditetapkan" state label'
+  );
+  assert.ok(
+    componentSource.includes('Tersimpan'),
+    'Must contain "Tersimpan" state label'
+  );
+});
+
+// -----------------------------------------------------------------------------
+// TEST 50: Source Contract H - Post-Generate Guidance & CTA
+// -----------------------------------------------------------------------------
+runTest('EA. Source Contract: Post-generate CTA displays guidance for saving and confirming calendar', () => {
+  const componentSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/components/administration/TimePlanningManager.tsx'),
+    'utf-8'
+  );
+
+  assert.ok(
+    componentSource.includes('Hari efektif berhasil dihitung'),
+    'Must contain post-generate guidance "Hari efektif berhasil dihitung"'
+  );
+  assert.ok(
+    componentSource.includes('Simpan & Tetapkan Kalender') || componentSource.includes('Simpan &amp; Tetapkan Kalender'),
+    'Must present CTA "Simpan & Tetapkan Kalender"'
+  );
+});
+
 console.log(`\nAll ${totalTests} Merdeka V5 Academic Calendar Runtime audit tests PASSED successfully!\n`);
