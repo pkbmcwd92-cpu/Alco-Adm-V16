@@ -68,6 +68,7 @@ export type AssessmentDocumentSnapshot =
   | BlankAssessmentDocumentSnapshot;
 
 export interface NormalizedAssessmentKisiKisiRow {
+  id?: string;
   no: number;
   tpCodeAndStatement: string;
   indicator: string;
@@ -76,14 +77,16 @@ export interface NormalizedAssessmentKisiKisiRow {
 }
 
 export interface NormalizedWrittenItem {
+  id?: string;
   no: number;
   prompt: string;
   stimulus?: string;
   itemType: string;
-  options?: { label: string; text: string }[];
+  options?: { id?: string; label: string; text: string }[];
 }
 
 export interface NormalizedOralItem {
+  id?: string;
   no: number;
   prompt: string;
   expectedResponse?: string;
@@ -117,6 +120,9 @@ export interface NormalizedAssessmentInstrument {
 }
 
 export interface NormalizedAssessmentAnswerKey {
+  id?: string;
+  instrumentId?: string;
+  instrumentItemId?: string;
   itemNumber?: number;
   instrumentType: string;
   answerType: string;
@@ -125,6 +131,9 @@ export interface NormalizedAssessmentAnswerKey {
 }
 
 export interface NormalizedAssessmentScoringGuide {
+  id?: string;
+  instrumentId?: string;
+  instrumentItemId?: string;
   title: string;
   guideType: string;
   maxScore?: number;
@@ -144,6 +153,9 @@ export interface NormalizedAssessmentRubricCriterion {
 }
 
 export interface NormalizedAssessmentRubric {
+  id?: string;
+  instrumentId?: string;
+  instrumentItemId?: string;
   title: string;
   scale: NormalizedAssessmentRubricScale[];
   criteria: NormalizedAssessmentRubricCriterion[];

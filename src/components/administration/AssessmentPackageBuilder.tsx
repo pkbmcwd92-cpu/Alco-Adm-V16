@@ -117,6 +117,20 @@ export const AssessmentPackageBuilder: React.FC<AssessmentPackageBuilderProps> =
   // 9C.7 AI Generation & Validation State
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [isRegenerating, setIsRegenerating] = useState<boolean>(false);
+  const [activeRegeneration, setActiveRegeneration] = useState<{
+    target: AssessmentRegenerationTarget;
+    targetId: string;
+    label: string;
+  } | null>(null);
+  const [regenerationFeedback, setRegenerationFeedback] = useState<{
+    status: 'SUCCESS' | 'ERROR';
+    title: string;
+    message: string;
+    target: AssessmentRegenerationTarget;
+    targetId: string;
+    locator?: import('../../types').AssessmentRegenerationLocator;
+    canRetry?: boolean;
+  } | null>(null);
   const [isValidating, setIsValidating] = useState<boolean>(false);
   const [isExportingDocx, setIsExportingDocx] = useState<boolean>(false);
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
@@ -442,15 +456,71 @@ export const AssessmentPackageBuilder: React.FC<AssessmentPackageBuilderProps> =
   };
 
   // 9C.7 Granular Regeneration Integration
+  const resolveRegenerationHumanLabel = (
+    target: AssessmentRegenerationTarget,
+    targetId: string,
+    locator?: import('../../types').AssessmentRegenerationLocator,
+    description?: string
+  ): string => {
+    if (description) return description;
+    switch (target) {
+      case 'INDICATOR':
+        return 'Indikator Kisi-Kisi';
+      case 'MATERIAL_CONTEXT':
+        return 'Materi / Konteks Kisi-Kisi';
+      case 'ITEM_PROMPT':
+        return 'Pertanyaan Soal';
+      case 'STIMULUS':
+        return 'Stimulus Soal';
+      case 'OPTIONS':
+        return 'Pilihan Jawaban Soal';
+      case 'PROPOSED_ANSWER':
+        return 'Kunci Jawaban';
+      case 'SCORING_GUIDE':
+        return 'Pedoman Penskoran';
+      case 'RUBRIC':
+        return 'Rubrik Penilaian';
+      case 'TASK':
+        return 'Tugas / Petunjuk Instrumen';
+      case 'EVIDENCE_REQUIREMENT':
+        return 'Persyaratan Bukti Portofolio';
+      case 'OBSERVATION_CONTENT':
+        return 'Aspek Observasi';
+      case 'COVERAGE_UNIT':
+        return 'Unit Cakupan Asesmen';
+      default:
+        return 'Bagian Asesmen';
+    }
+  };
+
   const handleRegenerateTarget = async (
     target: AssessmentRegenerationTarget,
     targetId: string,
     explicitOverride: boolean = false,
-    locator?: import('../../types').AssessmentRegenerationLocator
+    locator?: import('../../types').AssessmentRegenerationLocator,
+    description?: string
   ) => {
     if (!activePackage || !selectedPlan) return;
+
+    // Fail-closed validation for target identity
+    if (!targetId || typeof targetId !== 'string' || targetId.trim() === '') {
+      setRegenerationFeedback({
+        status: 'ERROR',
+        title: 'Gagal membuat ulang bagian asesmen.',
+        message: 'Bagian ini tidak memiliki ID identitas unik yang valid. Data sebelumnya tetap aman dan tidak diubah.',
+        target,
+        targetId: '',
+        locator,
+        canRetry: false,
+      });
+      return;
+    }
+
+    const label = resolveRegenerationHumanLabel(target, targetId, locator, description);
+    setActiveRegeneration({ target, targetId, label });
     setIsRegenerating(true);
     setGenerationError(null);
+    setRegenerationFeedback(null);
 
     try {
       const request = {
@@ -516,23 +586,62 @@ export const AssessmentPackageBuilder: React.FC<AssessmentPackageBuilderProps> =
           onSaveAssessmentPackage(result.regeneratedPackage);
           // Auto reset validation to force re-evaluation
           setValidationReport(null);
+          setRegenerationFeedback({
+            status: 'SUCCESS',
+            title: `${label} berhasil dibuat ulang.`,
+            message: 'Perangkat perlu diperiksa kembali.',
+            target,
+            targetId,
+            locator,
+          });
         }
       } else if (result.status === 'TEACHER_EDIT_PROTECTED') {
         const confirmOverwrite = window.confirm(
-          'Perhatian: Komponen ini telah Anda edit secara manual. Apakah Anda yakin ingin menimpa (overwrite) perubahan Anda dengan hasil generasi baru dari AI?'
+          `Perhatian: Komponen (${label}) telah Anda edit secara manual. Apakah Anda yakin ingin menimpa (overwrite) perubahan Anda dengan hasil generasi baru dari AI?`
         );
         if (confirmOverwrite) {
-          await handleRegenerateTarget(target, targetId, true, locator);
+          await handleRegenerateTarget(target, targetId, true, locator, description);
+        } else {
+          setActiveRegeneration(null);
         }
+      } else if (result.status === 'STALE_REGENERATION_REQUEST') {
+        setRegenerationFeedback({
+          status: 'ERROR',
+          title: `Gagal membuat ulang ${label}.`,
+          message: 'Versi paket asesmen telah diperbarui di sesi lain (stale revision). Data sebelumnya tetap aman dan tidak diubah.',
+          target,
+          targetId,
+          locator,
+          canRetry: false,
+        });
       } else {
         const msg = result.issues?.join(', ') || 'Gagal melakukan regenerasi granular.';
-        throw new Error(msg);
+        setRegenerationFeedback({
+          status: 'ERROR',
+          title: `Gagal membuat ulang ${label}.`,
+          message: `${msg}. Data sebelumnya tetap aman dan tidak diubah.`,
+          target,
+          targetId,
+          locator,
+          canRetry: true,
+        });
       }
     } catch (err: any) {
       console.error('Granular regeneration error:', err);
-      setGenerationError(err.message || 'Terjadi kesalahan saat regenerasi granular.');
+      const msg = err.message || 'Terjadi kesalahan saat regenerasi granular.';
+      setRegenerationFeedback({
+        status: 'ERROR',
+        title: `Gagal membuat ulang ${label}.`,
+        message: `${msg}. Data sebelumnya tetap aman dan tidak diubah.`,
+        target,
+        targetId,
+        locator,
+        canRetry: true,
+      });
+      setGenerationError(msg);
     } finally {
       setIsRegenerating(false);
+      setActiveRegeneration(null);
     }
   };
 
@@ -3345,6 +3454,24 @@ export const AssessmentPackageBuilder: React.FC<AssessmentPackageBuilderProps> =
                         model={previewModel}
                         workflowStatus={activePackage.workflowStatus}
                         needsReview={activePackage.needsReview}
+                        onRegenerateTarget={handleRegenerateTarget}
+                        activeRegeneration={activeRegeneration}
+                        feedback={regenerationFeedback}
+                        onDismissFeedback={() => setRegenerationFeedback(null)}
+                        onRetryFeedback={() => {
+                          if (
+                            regenerationFeedback?.canRetry &&
+                            regenerationFeedback.target &&
+                            regenerationFeedback.targetId
+                          ) {
+                            handleRegenerateTarget(
+                              regenerationFeedback.target,
+                              regenerationFeedback.targetId,
+                              false,
+                              regenerationFeedback.locator
+                            );
+                          }
+                        }}
                       />
                     );
                   } catch (err: any) {

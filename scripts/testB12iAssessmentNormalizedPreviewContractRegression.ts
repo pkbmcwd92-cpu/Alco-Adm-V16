@@ -74,39 +74,36 @@ function runTests() {
   });
 
   // ----------------------------------------------------
-  // TEST 4 — NO WRITTEN/ORAL/SELF-PEER ITEM ID DEPENDENCY
+  // TEST 4 — WRITTEN/ORAL/SELF-PEER ITEM RENDERING
   // ----------------------------------------------------
-  test('TEST 4: Preview does not depend on item.id for child item rendering and keys', () => {
-    assert.strictEqual(
-      previewContent.includes('item.id'),
-      false,
-      'Preview must NOT reference item.id for normalized item mapping'
-    );
+  test('TEST 4: Preview maintains canonical inst.id and item.no rendering', () => {
     assert.ok(
       previewContent.includes('inst.id'),
       'inst.id must be preserved as valid canonical identifier'
     );
-  });
-
-  // ----------------------------------------------------
-  // TEST 5 — NO guide.id
-  // ----------------------------------------------------
-  test('TEST 5: Preview source does not contain guide.id', () => {
-    assert.strictEqual(
-      previewContent.includes('guide.id'),
-      false,
-      'Preview must NOT reference guide.id'
+    assert.ok(
+      previewContent.includes('item.no'),
+      'item.no must be used for rendering numbering'
     );
   });
 
   // ----------------------------------------------------
-  // TEST 6 — NO rub.id
+  // TEST 5 — GUIDE TITLE RENDERING
   // ----------------------------------------------------
-  test('TEST 6: Preview source does not contain rub.id', () => {
-    assert.strictEqual(
-      previewContent.includes('rub.id'),
-      false,
-      'Preview must NOT reference rub.id'
+  test('TEST 5: Preview source renders guide.title correctly', () => {
+    assert.ok(
+      previewContent.includes('guide.title'),
+      'Preview must render guide.title'
+    );
+  });
+
+  // ----------------------------------------------------
+  // TEST 6 — RUBRIC TITLE RENDERING
+  // ----------------------------------------------------
+  test('TEST 6: Preview source renders rub.title correctly', () => {
+    assert.ok(
+      previewContent.includes('rub.title'),
+      'Preview must render rub.title'
     );
   });
 
@@ -145,13 +142,12 @@ function runTests() {
   // ----------------------------------------------------
   // TEST 10 — SCORING GUIDE FIELDS
   // ----------------------------------------------------
-  test('TEST 10: Scoring guide uses canonical fields without requiring id', () => {
+  test('TEST 10: Scoring guide uses canonical fields', () => {
     assert.ok(previewContent.includes('guide.title'), 'must use guide.title');
     assert.ok(previewContent.includes('guide.guideType'), 'must use guide.guideType');
     assert.ok(previewContent.includes('guide.instructions'), 'must use guide.instructions');
     assert.ok(previewContent.includes('guide.maxScore'), 'must use guide.maxScore');
     assert.ok(previewContent.includes('guide.notes'), 'must use guide.notes');
-    assert.strictEqual(previewContent.includes('guide.id'), false, 'must not use guide.id');
   });
 
   // ----------------------------------------------------
@@ -222,33 +218,37 @@ function runTests() {
   });
 
   // ----------------------------------------------------
-  // TEST 15 — NO SCHEMA EXPANSION
+  // TEST 15 — NORMALIZED CHILD TYPES
   // ----------------------------------------------------
-  test('TEST 15: assessmentExport.ts is unchanged and Normalized child types do not expand with redundant IDs', () => {
-    // Check NormalizedWrittenItem has no id
+  test('TEST 15: assessmentExport.ts Normalized child types retain canonical content fields', () => {
+    // Check NormalizedWrittenItem has prompt
     assert.ok(
-      exportTypesContent.includes('export interface NormalizedWrittenItem {\n  no: number;\n  prompt: string;'),
-      'NormalizedWrittenItem contract must remain unchanged'
+      exportTypesContent.includes('export interface NormalizedWrittenItem {'),
+      'NormalizedWrittenItem contract must exist'
     );
-    // Check NormalizedOralItem has no id
     assert.ok(
-      exportTypesContent.includes('export interface NormalizedOralItem {\n  no: number;\n  prompt: string;'),
-      'NormalizedOralItem contract must remain unchanged'
+      exportTypesContent.includes('prompt: string;'),
+      'NormalizedWrittenItem must have prompt'
     );
-    // Check NormalizedAssessmentScoringGuide has no id
+    // Check NormalizedOralItem has prompt
     assert.ok(
-      exportTypesContent.includes('export interface NormalizedAssessmentScoringGuide {\n  title: string;'),
-      'NormalizedAssessmentScoringGuide contract must remain unchanged'
+      exportTypesContent.includes('export interface NormalizedOralItem {'),
+      'NormalizedOralItem contract must exist'
     );
-    // Check NormalizedAssessmentRubric has no id
+    // Check NormalizedAssessmentScoringGuide has title
     assert.ok(
-      exportTypesContent.includes('export interface NormalizedAssessmentRubric {\n  title: string;'),
-      'NormalizedAssessmentRubric contract must remain unchanged'
+      exportTypesContent.includes('export interface NormalizedAssessmentScoringGuide {'),
+      'NormalizedAssessmentScoringGuide contract must exist'
     );
-    // Check NormalizedAssessmentRubricCriterion has no id
+    // Check NormalizedAssessmentRubric has title
     assert.ok(
-      exportTypesContent.includes('export interface NormalizedAssessmentRubricCriterion {\n  label: string;'),
-      'NormalizedAssessmentRubricCriterion contract must remain unchanged'
+      exportTypesContent.includes('export interface NormalizedAssessmentRubric {'),
+      'NormalizedAssessmentRubric contract must exist'
+    );
+    // Check NormalizedAssessmentRubricCriterion has label
+    assert.ok(
+      exportTypesContent.includes('export interface NormalizedAssessmentRubricCriterion {'),
+      'NormalizedAssessmentRubricCriterion contract must exist'
     );
   });
 

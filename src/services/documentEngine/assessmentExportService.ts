@@ -608,6 +608,7 @@ export function buildNormalizedAssessmentDocumentModel(
         }
 
         return {
+          id: bp.id,
           no: bp.order,
           tpCodeAndStatement: tpText,
           indicator: bp.assessmentIndicator || '-',
@@ -632,11 +633,13 @@ export function buildNormalizedAssessmentDocumentModel(
         switch (inst.type) {
           case 'WRITTEN_TEST': {
             base.writtenItems = (inst.items || []).map((item) => ({
+              id: item.id,
               no: item.order,
               prompt: item.prompt,
               stimulus: item.stimulus,
               itemType: item.itemType,
               options: item.options?.map((opt) => ({
+                id: opt.id,
                 label: opt.label,
                 text: opt.text,
               })),
@@ -645,6 +648,7 @@ export function buildNormalizedAssessmentDocumentModel(
           }
           case 'ORAL_TEST': {
             base.oralItems = (inst.items || []).map((item) => ({
+              id: item.id,
               no: item.order,
               prompt: item.prompt,
               expectedResponse: item.expectedResponse,
@@ -773,6 +777,9 @@ export function buildNormalizedAssessmentDocumentModel(
         }
 
         return {
+          id: ak.id,
+          instrumentId: ak.instrumentId,
+          instrumentItemId: ak.instrumentItemId,
           itemNumber: linkedItemOrder,
           instrumentType: linkedInstrument?.type ?? '-',
           answerType: ak.answerType,
@@ -785,6 +792,9 @@ export function buildNormalizedAssessmentDocumentModel(
   const scoringGuides: NormalizedAssessmentScoringGuide[] = isBlank
     ? []
     : snapshot.scoringGuides.map((sg) => ({
+        id: sg.id,
+        instrumentId: sg.instrumentId,
+        instrumentItemId: sg.instrumentItemId,
         title: sanitizeAssessmentVisibleTitle(sg.title) || sg.title,
         guideType: sg.guideType,
         maxScore: sg.maxScore,
@@ -818,6 +828,9 @@ export function buildNormalizedAssessmentDocumentModel(
         });
 
         return {
+          id: r.id,
+          instrumentId: r.instrumentId,
+          instrumentItemId: r.instrumentItemId,
           title: sanitizeAssessmentVisibleTitle(r.title) || r.title,
           scale: scaleHeaders,
           criteria: criteriaRows,
