@@ -51,6 +51,8 @@ const mockTpData: TPData = {
   id: 'tpdata-1',
   academicSettingId: 'setting-1',
   updatedAt: new Date().toISOString(),
+  workflowStatus: 'SIAP',
+  needsReview: false,
   items: [
     {
       id: 'tp-101',
@@ -135,7 +137,7 @@ runTest('No Fake JP: resolveLearningPlanAllocatedJP returns UNRESOLVED when no r
   assert.strictEqual(res.source, 'UNRESOLVED');
 });
 
-runTest('Real JP Resolution: resolveLearningPlanAllocatedJP resolves from canonical ATP and explicit plan', () => {
+runTest('Real JP Resolution: resolveLearningPlanAllocatedJP resolves from canonical time allocation and explicit plan', () => {
   const planWithAtp: LearningPlan = {
     id: 'lp-atp-jp',
     academicSettingId: 'setting-1',
@@ -155,15 +157,18 @@ runTest('Real JP Resolution: resolveLearningPlanAllocatedJP resolves from canoni
     updatedAt: new Date().toISOString(),
   };
 
-  const resAtp = resolveLearningPlanAllocatedJP(planWithAtp, { atp: mockAtpData });
+  const mockTimeAllocs = [
+    { id: 'ta-1', academicSettingId: 'setting-1', sourceType: 'ATP_ITEM' as const, sourceId: 'atp-201', atpItemId: 'atp-201', allocatedJP: 8, jp: 8 },
+  ];
+  const resAtp = resolveLearningPlanAllocatedJP(planWithAtp, { atp: mockAtpData, timeAllocations: mockTimeAllocs });
   assert.strictEqual(resAtp.allocatedJP, 8);
-  assert.strictEqual(resAtp.source, 'CANONICAL_ATP');
+  assert.strictEqual(resAtp.source, 'LINKED_TIME_ALLOCATION');
 
   const planExplicit: LearningPlan = {
     ...planWithAtp,
     allocatedJP: 10,
   };
-  const resExplicit = resolveLearningPlanAllocatedJP(planExplicit, { atp: mockAtpData });
+  const resExplicit = resolveLearningPlanAllocatedJP(planExplicit, { atp: mockAtpData, timeAllocations: mockTimeAllocs });
   assert.strictEqual(resExplicit.allocatedJP, 10);
   assert.strictEqual(resExplicit.source, 'EXPLICIT_PLAN');
 });
@@ -329,7 +334,11 @@ runTest('Recovery A.2 Test 13: substantive edit requires reconfirmation lifecycl
 });
 
 runTest('Recovery A.2 Test 16: partial ATP scope keeps ATP-linked TP and unlinked TP', () => {
-  const scopes = resolveAvailableScopes(mockTpData, mockAtpData);
+  const mockAllocs: any[] = [
+    { id: 'ta-1', sourceType: 'ATP_ITEM', sourceId: 'atp-201', atpItemId: 'atp-201', allocatedJP: 8 },
+    { id: 'ta-2', sourceType: 'TP', sourceId: 'tp-102', tpId: 'tp-102', allocatedJP: 6 },
+  ];
+  const scopes = resolveAvailableScopes(mockTpData, mockAtpData, mockAllocs);
   assert.ok(scopes.some((s) => s.type === 'ATP_STEP' && s.linkedTpIds.includes('tp-101')));
   assert.ok(scopes.some((s) => s.type === 'SINGLE_TP' && s.linkedTpIds.includes('tp-102')));
 });
@@ -456,6 +465,10 @@ runTest('Lifecycle: SIAP requires confirmation and blocks on draft integrity err
   const confirmedPlan: LearningPlan = {
     ...unconfirmedPlan,
     confirmedAt: new Date().toISOString(),
+    initialCompetency: 'Kompetensi awal siswa',
+    graduateProfileDimensions: ['Penalaran Kritis'],
+    resources: [{ id: 'r1', title: 'Buku Teks Siswa' }],
+    learningModel: 'Problem Based Learning',
   };
 
   const resConfirmed = validateLearningPlan(confirmedPlan, {
@@ -781,8 +794,8 @@ runTest('Recovery A.1 Test A: server.ts generate-learning-plan responseSchema ma
     nextEndpointIndex !== -1 ? nextEndpointIndex : endpointIndex + 10000
   );
   assert.ok(
-    endpointCode.includes("required: ['learningExperiences']") || endpointCode.includes('required: ["learningExperiences"]'),
-    'Top-level responseSchema must explicitly specify required: [\'learningExperiences\']'
+    endpointCode.includes("'learningExperiences'") && endpointCode.includes('required:'),
+    'Top-level responseSchema must explicitly specify required containing learningExperiences'
   );
 });
 

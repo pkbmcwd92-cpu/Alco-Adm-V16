@@ -76,6 +76,158 @@ export interface LearningPlanObjectiveResolution {
   danglingIds: string[];
 }
 
+export interface LearningPlanScopeUnit {
+  id: string;
+  type: 'ATP_STEP' | 'SINGLE_TP';
+  title: string;
+  stepNumber?: number;
+  tpCode?: string;
+  tpItem: TPItem;
+  atpItem?: ATPItem;
+  linkedTpIds: string[];
+  linkedAtpItemIds: string[];
+  materialScope?: string;
+  jp?: number | null;
+}
+
+export function isAtpReadyForAIScope(atpData?: ATPData | null): boolean {
+  if (!atpData || !atpData.items || atpData.items.length === 0) return false;
+  return atpData.workflowStatus === 'SIAP' && !atpData.needsReview;
+}
+
+/**
+ * Resolves semester JP for an ATP item strictly from active semester TimeAllocation records.
+ * Ignores ASSESSMENT and RESERVE allocations.
+ * Never falls back to annual ATPItem.jp or legacy ATPItem.allocatedJP.
+ */
+export function resolveAtpItemSemesterJP(
+  atpItem: ATPItem,
+  timeAllocations?: TimeAllocation[] | null
+): number | null {
+  if (!timeAllocations || timeAllocations.length === 0) return null;
+  const matches = timeAllocations.filter((ta) => {
+    if (ta.sourceType === 'ASSESSMENT' || ta.sourceType === 'RESERVE') return false;
+    const isExact = ta.sourceId === atpItem.id || ta.atpItemId === atpItem.id;
+    if (!isExact) return false;
+    if (ta.sourceType === 'ATP_ITEM' || !ta.sourceType) return true;
+    return false;
+  });
+  if (matches.length === 0) return null;
+  const total = matches.reduce((sum, ta) => {
+    const val = typeof ta.allocatedJP === 'number' && ta.allocatedJP > 0
+      ? ta.allocatedJP
+      : typeof ta.jp === 'number' && ta.jp > 0
+      ? ta.jp
+      : 0;
+    return sum + val;
+  }, 0);
+  return total > 0 ? total : null;
+}
+
+/**
+ * Resolves semester JP for a direct TP allocation strictly from active semester TimeAllocation records.
+ * Ignores ASSESSMENT and RESERVE allocations.
+ */
+export function resolveDirectTpSemesterJP(
+  tpItem: TPItem,
+  timeAllocations?: TimeAllocation[] | null
+): number | null {
+  if (!timeAllocations || timeAllocations.length === 0) return null;
+  const matches = timeAllocations.filter((ta) => {
+    if (ta.sourceType === 'ASSESSMENT' || ta.sourceType === 'RESERVE') return false;
+    const isExact = ta.sourceId === tpItem.id || ta.tpId === tpItem.id;
+    if (!isExact) return false;
+    if (ta.sourceType === 'TP' || !ta.sourceType) return true;
+    return false;
+  });
+  if (matches.length === 0) return null;
+  const total = matches.reduce((sum, ta) => {
+    const val = typeof ta.allocatedJP === 'number' && ta.allocatedJP > 0
+      ? ta.allocatedJP
+      : typeof ta.jp === 'number' && ta.jp > 0
+      ? ta.jp
+      : 0;
+    return sum + val;
+  }, 0);
+  return total > 0 ? total : null;
+}
+
+/**
+ * Canonical Resolver for Active Semester LearningPlan Scopes.
+ * Pipeline: Annual TP + Annual ATP + Active Semester TimeAllocation -> Semester Learning Scope.
+ * Only TP / ATP items that actually have positive learning TimeAllocation in the active semester are admitted.
+ * Never guesses from TP codes or uses legacy ATPItem.semester.
+ */
+export function resolveSemesterLearningScopes(
+  tpData?: TPData | null,
+  atpData?: ATPData | null,
+  timeAllocations?: TimeAllocation[] | null
+): LearningPlanScopeUnit[] {
+  const availableTps = tpData?.items || [];
+  if (availableTps.length === 0) return [];
+  if (!timeAllocations || timeAllocations.length === 0) return [];
+
+  // 1. Process ATP items with positive active semester time allocation
+  const atpScopes: LearningPlanScopeUnit[] = [];
+  const representedTpIds = new Set<string>();
+
+  if (isAtpReadyForAIScope(atpData) && atpData?.items) {
+    for (let index = 0; index < atpData.items.length; index++) {
+      const atpItem = atpData.items[index];
+      if (!atpItem.tpId) continue;
+      const linkedTp = availableTps.find((t) => t.id === atpItem.tpId);
+      if (!linkedTp) continue;
+
+      const allocatedJP = resolveAtpItemSemesterJP(atpItem, timeAllocations);
+      // ONLY include if positive allocatedJP exists in active semester timeAllocations
+      if (typeof allocatedJP === 'number' && allocatedJP > 0) {
+        representedTpIds.add(linkedTp.id);
+        const stepNo = atpItem.stepNumber || atpItem.sequence || index + 1;
+        const material = atpItem.materialScope || linkedTp.contentScope || linkedTp.statement;
+
+        atpScopes.push({
+          id: atpItem.id,
+          type: 'ATP_STEP',
+          title: `Langkah ${stepNo}: ${material}`,
+          stepNumber: stepNo,
+          tpCode: linkedTp.code,
+          tpItem: linkedTp,
+          atpItem: atpItem,
+          linkedTpIds: [linkedTp.id],
+          linkedAtpItemIds: [atpItem.id],
+          materialScope: material,
+          jp: allocatedJP,
+        });
+      }
+    }
+  }
+
+  // 2. Direct TP allocations (for TPs not represented by active semester ATP scopes)
+  const singleTpScopes: LearningPlanScopeUnit[] = [];
+  for (const tpItem of availableTps) {
+    if (representedTpIds.has(tpItem.id)) continue;
+    const directJP = resolveDirectTpSemesterJP(tpItem, timeAllocations);
+    if (typeof directJP === 'number' && directJP > 0) {
+      singleTpScopes.push({
+        id: tpItem.id,
+        type: 'SINGLE_TP',
+        title: tpItem.code ? `[${tpItem.code}] ${tpItem.statement}` : tpItem.statement,
+        tpCode: tpItem.code || undefined,
+        tpItem: tpItem,
+        linkedTpIds: [tpItem.id],
+        linkedAtpItemIds: [],
+        materialScope: tpItem.contentScope,
+        jp: directJP,
+      });
+    }
+  }
+
+  return [...atpScopes, ...singleTpScopes];
+}
+
+export const resolveAvailableScopes = resolveSemesterLearningScopes;
+export const buildLearningPlanScopeUnits = resolveSemesterLearningScopes;
+
 export function resolveLearningPlanObjectives(params: {
   tpIds?: string[];
   tp?: TPData | null;
@@ -470,6 +622,64 @@ export function validateLearningPlan(
         });
       } else {
         errors.push(`Langkah ATP dengan ID '${atpItemId}' tidak ditemukan dalam alur ATP aktif (Orphan ATP ID).`);
+      }
+    }
+  }
+
+  // 3b. Validate Active Semester TimeAllocation Scope (Fail-closed on cross-semester or unallocated items)
+  if (context.timeAllocations && context.timeAllocations.length > 0) {
+    if (plan.atpItemIds && plan.atpItemIds.length > 0) {
+      for (const atpItemId of plan.atpItemIds) {
+        const isAtpAllocated = context.timeAllocations.some((ta) => {
+          if (ta.sourceType === 'ASSESSMENT' || ta.sourceType === 'RESERVE') return false;
+          const isExact = ta.sourceId === atpItemId || ta.atpItemId === atpItemId;
+          if (!isExact) return false;
+          if (ta.sourceType === 'ATP_ITEM' || !ta.sourceType) {
+            const val = typeof ta.allocatedJP === 'number' && ta.allocatedJP > 0
+              ? ta.allocatedJP
+              : typeof ta.jp === 'number' && ta.jp > 0
+              ? ta.jp
+              : 0;
+            return val > 0;
+          }
+          return false;
+        });
+        if (!isAtpAllocated) {
+          errors.push(`Langkah ATP dengan ID '${atpItemId}' tidak memiliki alokasi waktu pada semester aktif.`);
+        }
+      }
+    }
+
+    if (plan.tpIds && plan.tpIds.length > 0) {
+      for (const tpId of plan.tpIds) {
+        const isTpAllocated = context.timeAllocations.some((ta) => {
+          if (ta.sourceType === 'ASSESSMENT' || ta.sourceType === 'RESERVE') return false;
+          if (ta.sourceType === 'ATP_ITEM' || !ta.sourceType) {
+            const matchingAtp = context.atp?.items?.find((a) => a.id === ta.sourceId || a.id === ta.atpItemId);
+            if (matchingAtp && matchingAtp.tpId === tpId) {
+              const val = typeof ta.allocatedJP === 'number' && ta.allocatedJP > 0
+                ? ta.allocatedJP
+                : typeof ta.jp === 'number' && ta.jp > 0
+                ? ta.jp
+                : 0;
+              return val > 0;
+            }
+          }
+          if (ta.sourceType === 'TP' || !ta.sourceType) {
+            if (ta.sourceId === tpId || ta.tpId === tpId) {
+              const val = typeof ta.allocatedJP === 'number' && ta.allocatedJP > 0
+                ? ta.allocatedJP
+                : typeof ta.jp === 'number' && ta.jp > 0
+                ? ta.jp
+                : 0;
+              return val > 0;
+            }
+          }
+          return false;
+        });
+        if (!isTpAllocated) {
+          errors.push(`Tujuan Pembelajaran dengan ID '${tpId}' tidak memiliki alokasi waktu pada semester aktif.`);
+        }
       }
     }
   }

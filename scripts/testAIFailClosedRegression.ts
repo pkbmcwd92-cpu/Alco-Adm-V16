@@ -268,7 +268,8 @@ runTest('Scope Test 17: 1 scope -> single scope resolved for auto-selection', ()
     contentScope: 'Teks Narasi',
     order: 1,
   };
-  const scopes = resolveAvailableScopes({ items: [singleTp] } as any, { items: [] } as any);
+  const allocs: any[] = [{ id: 'ta-1', sourceType: 'TP', sourceId: 'tp-1', tpId: 'tp-1', allocatedJP: 4 }];
+  const scopes = resolveAvailableScopes({ items: [singleTp] } as any, { items: [] } as any, allocs);
   assert.strictEqual(scopes.length, 1);
   assert.strictEqual(scopes[0].tpCode, 'TP 4.1');
 });
@@ -276,14 +277,19 @@ runTest('Scope Test 17: 1 scope -> single scope resolved for auto-selection', ()
 runTest('Scope Test 18: >1 scope -> multiple scopes resolved for explicit selection', () => {
   const tp1: TPItem = { id: 'tp-1', code: 'TP 4.1', statement: 'Membaca nyaring', competence: '', contentScope: '', order: 1 };
   const tp2: TPItem = { id: 'tp-2', code: 'TP 4.2', statement: 'Menulis narasi', competence: '', contentScope: '', order: 2 };
-  const scopes = resolveAvailableScopes({ items: [tp1, tp2] } as any, { items: [] } as any);
+  const allocs: any[] = [
+    { id: 'ta-1', sourceType: 'TP', sourceId: 'tp-1', tpId: 'tp-1', allocatedJP: 4 },
+    { id: 'ta-2', sourceType: 'TP', sourceId: 'tp-2', tpId: 'tp-2', allocatedJP: 4 },
+  ];
+  const scopes = resolveAvailableScopes({ items: [tp1, tp2] } as any, { items: [] } as any, allocs);
   assert.strictEqual(scopes.length, 2);
 });
 
 runTest('Scope Test 19: selected scope canonical IDs preserved accurately', () => {
   const tp1: TPItem = { id: 'tp-canonical-101', code: 'TP 4.1', statement: 'Membaca nyaring', competence: '', contentScope: '', order: 1 };
   const atp1: ATPItem = { id: 'atp-canonical-202', tpId: 'tp-canonical-101', stepNumber: 1, materialScope: 'Teks Pendek' };
-  const scopes = resolveAvailableScopes({ items: [tp1] } as any, { items: [atp1], workflowStatus: 'SIAP' } as any);
+  const allocs: any[] = [{ id: 'ta-1', sourceType: 'ATP_ITEM', sourceId: 'atp-canonical-202', atpItemId: 'atp-canonical-202', allocatedJP: 6 }];
+  const scopes = resolveAvailableScopes({ items: [tp1] } as any, { items: [atp1], workflowStatus: 'SIAP' } as any, allocs);
   assert.strictEqual(scopes.length, 1);
   assert.strictEqual(scopes[0].linkedTpIds[0], 'tp-canonical-101');
   assert.strictEqual(scopes[0].linkedAtpItemIds[0], 'atp-canonical-202');
@@ -298,7 +304,8 @@ runTest('Scope Test 20: missing TP code not displayed as fabricated canonical "T
     contentScope: 'Instruksi Lisan',
     order: 1,
   };
-  const scopes = resolveAvailableScopes({ items: [uncodedTp] } as any, { items: [] } as any);
+  const allocs: any[] = [{ id: 'ta-1', sourceType: 'TP', sourceId: 'tp-no-code', tpId: 'tp-no-code', allocatedJP: 4 }];
+  const scopes = resolveAvailableScopes({ items: [uncodedTp] } as any, { items: [] } as any, allocs);
   assert.strictEqual(scopes.length, 1);
   assert.strictEqual(scopes[0].tpCode, undefined);
   assert.strictEqual(scopes[0].title.includes('TP 1'), false);

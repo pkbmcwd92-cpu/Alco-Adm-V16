@@ -46,6 +46,13 @@ import {
   isSubstantiveLearningPlanChange,
   resolveLearningPlanObjectives,
   resolveLearningPlanAllocatedJP,
+  resolveSemesterLearningScopes,
+  resolveAvailableScopes,
+  buildLearningPlanScopeUnits,
+  resolveAtpItemSemesterJP,
+  resolveDirectTpSemesterJP,
+  isAtpReadyForAIScope,
+  LearningPlanScopeUnit,
   LEARNING_EXPERIENCE_PHASE_LABELS,
 } from '../../services/learningPlanService';
 import { generateLearningPlanWithAI } from '../../services/aiService';
@@ -60,95 +67,15 @@ import {
 import saveAs from 'file-saver';
 import { TPItem, ATPItem } from '../../types';
 
-export interface LearningPlanScopeUnit {
-  id: string;
-  type: 'ATP_STEP' | 'SINGLE_TP';
-  title: string;
-  stepNumber?: number;
-  tpCode?: string;
-  tpItem: TPItem;
-  atpItem?: ATPItem;
-  linkedTpIds: string[];
-  linkedAtpItemIds: string[];
-  materialScope?: string;
-  jp?: number | null;
-}
-
-function isAtpReadyForAIScope(atpData?: ATPData | null): boolean {
-  if (!atpData || !atpData.items || atpData.items.length === 0) return false;
-  return atpData.workflowStatus === 'SIAP' && !atpData.needsReview;
-}
-
-export function resolveAtpItemSemesterJP(
-  atpItem: ATPItem,
-  timeAllocations?: TimeAllocation[] | null
-): number | null {
-  if (!timeAllocations || timeAllocations.length === 0) return null;
-  const match = timeAllocations.find((ta) => {
-    if (ta.sourceType === 'ASSESSMENT' || ta.sourceType === 'RESERVE') return false;
-    const isExact = (ta.sourceId === atpItem.id || ta.atpItemId === atpItem.id);
-    if (!isExact) return false;
-    if (ta.sourceType === 'ATP_ITEM' || !ta.sourceType) return true;
-    return false;
-  });
-  if (match) {
-    if (typeof match.allocatedJP === 'number' && match.allocatedJP > 0) return match.allocatedJP;
-    if (typeof match.jp === 'number' && match.jp > 0) return match.jp;
-  }
-  return null;
-}
-
-export function resolveAvailableScopes(
-  tpData?: TPData | null,
-  atpData?: ATPData | null,
-  timeAllocations?: TimeAllocation[] | null
-): LearningPlanScopeUnit[] {
-  const availableTps = tpData?.items || [];
-  if (availableTps.length === 0) return [];
-
-  const availableAtps = isAtpReadyForAIScope(atpData)
-    ? (atpData?.items || []).filter((a) => a.tpId && availableTps.some((t) => t.id === a.tpId))
-    : [];
-  const representedTpIds = new Set<string>();
-  const atpScopes = availableAtps.map((atpItem, index) => {
-      const linkedTp = availableTps.find((t) => t.id === atpItem.tpId)!;
-      representedTpIds.add(linkedTp.id);
-      const stepNo = atpItem.stepNumber || index + 1;
-      const material = atpItem.materialScope || linkedTp.contentScope || linkedTp.statement;
-      const allocatedJP = resolveAtpItemSemesterJP(atpItem, timeAllocations);
-
-      return {
-        id: atpItem.id,
-        type: 'ATP_STEP' as const,
-        title: `Langkah ${stepNo}: ${material}`,
-        stepNumber: stepNo,
-        tpCode: linkedTp.code,
-        tpItem: linkedTp,
-        atpItem: atpItem,
-        linkedTpIds: [linkedTp.id],
-        linkedAtpItemIds: [atpItem.id],
-        materialScope: material,
-        jp: allocatedJP,
-      };
-    });
-
-  const singleTpScopes: LearningPlanScopeUnit[] = availableTps.filter((tpItem) => !representedTpIds.has(tpItem.id)).map((tpItem) => {
-    return {
-      id: tpItem.id,
-      type: 'SINGLE_TP' as const,
-      title: tpItem.code ? `[${tpItem.code}] ${tpItem.statement}` : tpItem.statement,
-      tpCode: tpItem.code || undefined,
-      tpItem: tpItem,
-      linkedTpIds: [tpItem.id],
-      linkedAtpItemIds: [],
-      materialScope: tpItem.contentScope,
-      jp: null,
-    };
-  });
-  return [...atpScopes, ...singleTpScopes];
-}
-
-export const buildLearningPlanScopeUnits = resolveAvailableScopes;
+export type { LearningPlanScopeUnit };
+export {
+  resolveSemesterLearningScopes,
+  resolveAvailableScopes,
+  buildLearningPlanScopeUnits,
+  resolveAtpItemSemesterJP,
+  resolveDirectTpSemesterJP,
+  isAtpReadyForAIScope,
+};
 
 interface LearningPlanManagerProps {
   profile: TeacherProfile;
@@ -193,6 +120,37 @@ export const LearningPlanManager: React.FC<LearningPlanManagerProps> = ({
     if (!selectedPlanId) return null;
     return learningPlans.find((p) => p.id === selectedPlanId) || null;
   }, [selectedPlanId, learningPlans]);
+
+  // Canonical Active Semester Learning Scopes (Single Source of Truth)
+  const semesterScopes = useMemo(() => {
+    return resolveSemesterLearningScopes(tp, atp, timeAllocations);
+  }, [tp, atp, timeAllocations]);
+
+  const activeSemesterTps = useMemo(() => {
+    const seen = new Set<string>();
+    const list: TPItem[] = [];
+    for (const scope of semesterScopes) {
+      if (scope.tpItem && !seen.has(scope.tpItem.id)) {
+        seen.add(scope.tpItem.id);
+        list.push(scope.tpItem);
+      }
+    }
+    return list;
+  }, [semesterScopes]);
+
+  const activeSemesterAtpItems = useMemo(() => {
+    const list: { atpItem: ATPItem; linkedTp: TPItem; jp: number }[] = [];
+    for (const scope of semesterScopes) {
+      if (scope.type === 'ATP_STEP' && scope.atpItem) {
+        list.push({
+          atpItem: scope.atpItem,
+          linkedTp: scope.tpItem,
+          jp: scope.jp || 0,
+        });
+      }
+    }
+    return list;
+  }, [semesterScopes]);
 
   // Validation of active plan
   const validationResult = useMemo(() => {
@@ -333,13 +291,13 @@ export const LearningPlanManager: React.FC<LearningPlanManagerProps> = ({
       showNotification('error', 'ATP belum siap untuk digunakan sebagai sumber Draf AI. Tinjau dan selesaikan ATP terlebih dahulu.');
       return;
     }
-    const scopes = resolveAvailableScopes(tp, atp, timeAllocations);
+    const scopes = resolveSemesterLearningScopes(tp, atp, timeAllocations);
 
     if (scopes.length === 0) {
       recordLearningPlanBlocked('NO_VALID_SCOPE');
       showNotification(
         'error',
-        'Tidak ada Scope/Unit Pembelajaran yang valid. Silakan buat TP atau ATP terlebih dahulu di menu Tujuan Pembelajaran / ATP.'
+        'Belum ada TP/ATP yang dialokasikan pada semester aktif. Selesaikan Pemetaan Waktu terlebih dahulu.'
       );
       return;
     }
@@ -413,8 +371,8 @@ export const LearningPlanManager: React.FC<LearningPlanManagerProps> = ({
   };
 
   const resolveSingleAtpForTp = (tpId: string): string[] => {
-    const matches = (atp?.items || []).filter((item) => item.tpId === tpId);
-    return matches.length === 1 ? [matches[0].id] : [];
+    const matches = activeSemesterAtpItems.filter((entry) => entry.atpItem.tpId === tpId);
+    return matches.length === 1 ? [matches[0].atpItem.id] : [];
   };
 
   const handleUpdateTpSelection = (tpId: string, checked: boolean) => {
@@ -965,9 +923,9 @@ export const LearningPlanManager: React.FC<LearningPlanManagerProps> = ({
                         <label className="block text-xs font-semibold text-slate-700 mb-2">
                           Pilih Tujuan Pembelajaran Terkait (TP) <span className="text-rose-500">*</span>
                         </label>
-                        {tp?.items && tp.items.length > 0 ? (
+                        {activeSemesterTps.length > 0 ? (
                           <div className="space-y-2 max-h-56 overflow-y-auto p-2 border border-slate-200 rounded-lg bg-slate-50">
-                            {tp.items.map((t) => {
+                            {activeSemesterTps.map((t) => {
                               const isChecked = activePlan.tpIds.includes(t.id);
                               return (
                                 <label
@@ -998,7 +956,9 @@ export const LearningPlanManager: React.FC<LearningPlanManagerProps> = ({
                             })}
                           </div>
                         ) : (
-                          <p className="text-xs text-rose-600 italic">Data TP belum disusun di workspace ini.</p>
+                          <p className="text-xs text-rose-600 italic">
+                            Belum ada Tujuan Pembelajaran yang dialokasikan pada semester aktif. Selesaikan Pemetaan Waktu terlebih dahulu.
+                          </p>
                         )}
                       </div>
 
@@ -1006,10 +966,9 @@ export const LearningPlanManager: React.FC<LearningPlanManagerProps> = ({
                         <label className="block text-xs font-semibold text-slate-700 mb-2">
                           Tahapan ATP Terkait
                         </label>
-                        {atp?.items && atp.items.length > 0 ? (
+                        {activeSemesterAtpItems.length > 0 ? (
                           <div className="space-y-2 max-h-48 overflow-y-auto p-2 border border-slate-200 rounded-lg bg-slate-50">
-                            {atp.items.map((item) => {
-                              const linkedTp = tp?.items?.find((t) => t.id === item.tpId);
+                            {activeSemesterAtpItems.map(({ atpItem: item, linkedTp, jp }) => {
                               const isChecked = (activePlan.atpItemIds || []).includes(item.id);
                               return (
                                 <label key={item.id} className="flex items-start gap-2.5 p-2 rounded-md cursor-pointer border bg-white/70 border-slate-200 hover:bg-white">
@@ -1031,22 +990,16 @@ export const LearningPlanManager: React.FC<LearningPlanManagerProps> = ({
                                   <div className="text-xs">
                                     <span className="font-bold text-slate-800 mr-1.5">Langkah {item.stepNumber || '-'}</span>
                                     <span className="text-slate-700">{item.materialScope || item.tpStatement || linkedTp?.statement || 'ATP belum berisi materi'}</span>
-                                    {(() => {
-                                      const semesterJp = resolveAtpItemSemesterJP(item, timeAllocations);
-                                      const jpText = semesterJp !== null ? `${semesterJp} JP` : 'JP belum dialokasikan';
-                                      return (
-                                        <span className="text-slate-400 block mt-0.5">
-                                          {linkedTp?.code || 'TP'} • {jpText}
-                                        </span>
-                                      );
-                                    })()}
+                                    <span className="text-slate-400 block mt-0.5">
+                                      {linkedTp?.code || 'TP'} • {jp} JP
+                                    </span>
                                   </div>
                                 </label>
                               );
                             })}
                           </div>
                         ) : (
-                          <p className="text-xs text-slate-500 italic">ATP belum tersedia. TP tetap dapat dipilih tanpa ATP.</p>
+                          <p className="text-xs text-slate-500 italic">Belum ada tahapan ATP yang dialokasikan pada semester aktif.</p>
                         )}
                       </div>
 
